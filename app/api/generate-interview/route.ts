@@ -40,9 +40,7 @@ function cleanJson(text: string): string {
 }
 
 function extractTransaction(answer: string): string {
-  const match = answer.match(
-    /T[-\s]?code\s*[:=-]\s*([A-Z0-9/]+)/i
-  );
+  const match = answer.match(/T[-\s]?code\s*[:=-]\s*([A-Z0-9/]+)/i);
 
   if (match?.[1]) {
     return match[1].toUpperCase();
@@ -60,28 +58,85 @@ function fallbackSearchQuery(
   transaction: string,
   title: string
 ): string {
-  return [
-    "SAP",
-    sapModule,
-    transaction,
-    title,
-    "SAP GUI",
-    "screen",
-    "screenshot",
-  ]
+  return ["SAP", sapModule, transaction, title, "SAP GUI", "screen", "screenshot"]
     .filter(Boolean)
     .join(" ");
 }
 
-async function searchGoogleImage(
-  query: string
-): Promise<ImageResult | null> {
+/*
+==================================================
+IMAGE RELEVANCE FIX
+==================================================
+
+PURANI CODE (jo humne dekha) sirf pehli image le leta tha
+jisme koi bhi image field (original/thumbnail) mojood ho -
+bina ye check kiye ki image actually is SAP step se match
+karti hai ya nahi. Isi wajah se galat images (jaise ABAP
+debugger, unrelated tutorials) dikh rahi thi.
+
+NAYA CODE:
+1. Negative keywords wali images (debugger, source code,
+   workbench, etc.) turant reject karta hai.
+2. Har image ko score deta hai based on kitne keywords
+   match hote hain query se.
+3. Sirf tabhi image deta hai jab best score kam se kam
+   MIN_ACCEPTABLE_SCORE ho, warna null return karta hai
+   (matlab is step ke liye koi image nahi dikhegi - jo
+   galat image dikhane se hamesha behtar hai).
+*/
+
+const MIN_ACCEPTABLE_SCORE = 5;
+
+const NEGATIVE_KEYWORDS = [
+  "debugger",
+  "abap editor",
+  "abap program",
+  "source code",
+  "class builder",
+  "breakpoint",
+  "watchpoint",
+  "workbench",
+  "developer",
+];
+
+function scoreImage(image: ImageResult, query: string): number {
+  const combined = [image.title || "", image.source || "", image.link || ""]
+    .join(" ")
+    .toLowerCase();
+
+  if (NEGATIVE_KEYWORDS.some((kw) => combined.includes(kw))) {
+    return -100;
+  }
+
+  const queryWords = query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w.length > 3 && w !== "screenshot" && w !== "screen");
+
+  let score = 0;
+
+  for (const word of queryWords) {
+    if (combined.includes(word)) {
+      score += 2;
+    }
+  }
+
+  if (combined.includes("sap")) {
+    score += 3;
+  }
+
+  if (image.original || image.thumbnail || image.serpapi_thumbnail) {
+    score += 1;
+  }
+
+  return score;
+}
+
+async function searchGoogleImage(query: string): Promise<ImageResult | null> {
   const apiKey = process.env.SERPAPI_KEY;
 
   if (!apiKey) {
-    console.error(
-      "SERPAPI_KEY is missing from .env.local"
-    );
+    console.error("SERPAPI_KEY is missing from .env.local");
     return null;
   }
 
@@ -96,9 +151,7 @@ async function searchGoogleImage(
       device: "desktop",
     });
 
-    const url =
-      "https://serpapi.com/search.json?" +
-      params.toString();
+    const url = "https://serpapi.com/search.json?" + params.toString();
 
     const response = await fetch(url, {
       method: "GET",
@@ -106,51 +159,55 @@ async function searchGoogleImage(
     });
 
     if (!response.ok) {
-      console.error(
-        "SerpApi HTTP error:",
-        response.status
-      );
-
+      console.error("SerpApi HTTP error:", response.status);
       return null;
     }
 
     const data = await response.json();
 
     if (data.error) {
-      console.error(
-        "SerpApi error:",
-        data.error
-      );
-
+      console.error("SerpApi error:", data.error);
       return null;
     }
 
-    const images: ImageResult[] =
-      data.images_results || [];
+    const images: ImageResult[] = data.images_results || [];
 
     if (!images.length) {
-      console.log(
-        "No Google images found for:",
-        query
-      );
-
+      console.log("No Google images found for:", query);
       return null;
     }
 
-    const best = images.find(
-      (image) =>
-        image.original ||
-        image.thumbnail ||
-        image.serpapi_thumbnail
-    );
+    // FIX: score every candidate image and reject bad matches,
+    // instead of blindly taking the first one with an image field.
+    let bestImage: ImageResult | null = null;
+    let bestScore = -1;
 
-    return best || null;
+    for (const image of images) {
+      if (!(image.original || image.thumbnail || image.serpapi_thumbnail)) {
+        continue;
+      }
+
+      const score = scoreImage(image, query);
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestImage = image;
+      }
+    }
+
+    if (!bestImage || bestScore < MIN_ACCEPTABLE_SCORE) {
+      console.log(
+        "IMAGE REJECTED - best score too low:",
+        bestScore,
+        "for query:",
+        query
+      );
+      return null;
+    }
+
+    return bestImage;
   } catch (error) {
-    console.error(
-      "SerpApi image search error:",
-      error
-    );
-
+    console.error("SerpApi image search error:", error);
     return null;
   }
 }
@@ -159,19 +216,11 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    const message =
-      body.message ||
-      body.question ||
-      body.prompt ||
-      "";
+    const message = body.message || body.question || body.prompt || "";
 
-    const sapModule =
-      body.sapModule || "SAP";
+    const sapModule = body.sapModule || "SAP";
 
-    if (
-      typeof message !== "string" ||
-      !message.trim()
-    ) {
+    if (typeof message !== "string" || !message.trim()) {
       return NextResponse.json(
         {
           success: false,
@@ -206,6 +255,27 @@ Your job is to create:
 1. A simple and accurate SAP answer.
 2. Exact visual steps for the important procedure steps.
 3. A specific Google Images search query for every visual step.
+
+==================================================
+EXPLAIN LIKE A COMPLETE BEGINNER
+==================================================
+
+The reader has ZERO SAP background. Write so that even someone who
+has never opened SAP GUI can follow along and do it themselves.
+
+Rules:
+- Use very short sentences. One idea per sentence.
+- Before jumping into steps, add one line explaining WHAT this
+  activity means in plain, everyday words (no SAP jargon).
+- When you use a technical word for the first time (like "T-code",
+  "G/L account", "posting"), explain it in 4-6 simple words right
+  after it, in brackets.
+- Avoid stacking multiple instructions in one sentence.
+- Use everyday comparisons where it helps
+  (example: "A journal entry is like writing in a diary that money
+  moved from one account to another").
+- Never assume the reader already knows what a screen, field, or
+  button looks like - describe it.
 
 ==================================================
 RETURN FORMAT
@@ -568,8 +638,7 @@ Before returning JSON, verify:
       input: message,
     });
 
-    const rawOutput =
-      response.output_text || "";
+    const rawOutput = response.output_text || "";
 
     /*
     ==================================================
@@ -583,51 +652,28 @@ Before returning JSON, verify:
     };
 
     try {
-      const cleaned =
-        cleanJson(rawOutput);
+      const cleaned = cleanJson(rawOutput);
 
-      aiResult =
-        JSON.parse(cleaned);
+      aiResult = JSON.parse(cleaned);
 
-      if (
-        !aiResult.answer ||
-        typeof aiResult.answer !==
-          "string"
-      ) {
-        throw new Error(
-          "AI did not return a valid answer."
-        );
+      if (!aiResult.answer || typeof aiResult.answer !== "string") {
+        throw new Error("AI did not return a valid answer.");
       }
 
-      if (
-        !Array.isArray(
-          aiResult.visualSteps
-        )
-      ) {
+      if (!Array.isArray(aiResult.visualSteps)) {
         aiResult.visualSteps = [];
       }
     } catch (error) {
-      console.error(
-        "AI JSON PARSE ERROR:",
-        error
-      );
+      console.error("AI JSON PARSE ERROR:", error);
 
-      console.error(
-        "RAW AI RESPONSE:",
-        rawOutput
-      );
+      console.error("RAW AI RESPONSE:", rawOutput);
 
       return NextResponse.json({
         success: true,
 
-        answer:
-          rawOutput ||
-          "Unable to generate an answer.",
+        answer: rawOutput || "Unable to generate an answer.",
 
-        transaction:
-          extractTransaction(
-            rawOutput
-          ),
+        transaction: extractTransaction(rawOutput),
 
         visuals: [],
 
@@ -647,10 +693,7 @@ Before returning JSON, verify:
     ==================================================
     */
 
-    const transaction =
-      extractTransaction(
-        aiResult.answer
-      );
+    const transaction = extractTransaction(aiResult.answer);
 
     /*
     ==================================================
@@ -658,37 +701,22 @@ Before returning JSON, verify:
     ==================================================
     */
 
-    const visualSteps =
-      aiResult.visualSteps
-        .filter(
-          (item) =>
-            item &&
-            typeof item.step ===
-              "number" &&
-            typeof item.title ===
-              "string"
-        )
-        .map((item) => ({
-          step: item.step,
+    const visualSteps = aiResult.visualSteps
+      .filter(
+        (item) =>
+          item && typeof item.step === "number" && typeof item.title === "string"
+      )
+      .map((item) => ({
+        step: item.step,
 
-          title:
-            item.title.trim(),
+        title: item.title.trim(),
 
-          searchQuery:
-            (
-              item.searchQuery ||
-              fallbackSearchQuery(
-                sapModule,
-                transaction,
-                item.title
-              )
-            ).trim(),
-        }));
+        searchQuery: (
+          item.searchQuery || fallbackSearchQuery(sapModule, transaction, item.title)
+        ).trim(),
+      }));
 
-    console.log(
-      "AI VISUAL STEPS:",
-      visualSteps
-    );
+    console.log("AI VISUAL STEPS:", visualSteps);
 
     /*
     ==================================================
@@ -696,84 +724,51 @@ Before returning JSON, verify:
     ==================================================
     */
 
-    const visualResults =
-      await Promise.all(
-        visualSteps.map(
-          async (step) => {
-            const image =
-              await searchGoogleImage(
-                step.searchQuery
-              );
+    const visualResults = await Promise.all(
+      visualSteps.map(async (step) => {
+        const image = await searchGoogleImage(step.searchQuery);
 
-            if (!image) {
-              return null;
-            }
+        if (!image) {
+          return null;
+        }
 
-            const imageUrl =
-              image.original ||
-              image.thumbnail ||
-              image.serpapi_thumbnail ||
-              "";
+        const imageUrl = image.original || image.thumbnail || image.serpapi_thumbnail || "";
 
-            const fallbackImage =
-              image.thumbnail ||
-              image.serpapi_thumbnail ||
-              image.original ||
-              "";
+        const fallbackImage = image.thumbnail || image.serpapi_thumbnail || image.original || "";
 
-            if (!imageUrl) {
-              return null;
-            }
+        if (!imageUrl) {
+          return null;
+        }
 
-            return {
-              step: step.step,
+        return {
+          step: step.step,
 
-              title:
-                step.title,
+          title: step.title,
 
-              query:
-                step.searchQuery,
+          query: step.searchQuery,
 
-              image:
-                imageUrl,
+          image: imageUrl,
 
-              fallbackImage,
+          fallbackImage,
 
-              thumbnail:
-                fallbackImage,
+          thumbnail: fallbackImage,
 
-              source:
-                image.source ||
-                "Google Images",
+          source: image.source || "Google Images",
 
-              sourceUrl:
-                image.link || "",
+          sourceUrl: image.link || "",
 
-              transaction,
-            };
-          }
-        )
-      );
-
-    const visuals =
-      visualResults.filter(
-        (
-          item
-        ): item is NonNullable<
-          typeof item
-        > =>
-          item !== null
-      );
-
-    console.log(
-      "FINAL VISUAL COUNT:",
-      visuals.length
+          transaction,
+        };
+      })
     );
 
-    console.log(
-      "FINAL VISUALS:",
-      visuals
+    const visuals = visualResults.filter(
+      (item): item is NonNullable<typeof item> => item !== null
     );
+
+    console.log("FINAL VISUAL COUNT:", visuals.length);
+
+    console.log("FINAL VISUALS:", visuals);
 
     /*
     ==================================================
@@ -784,8 +779,7 @@ Before returning JSON, verify:
     return NextResponse.json({
       success: true,
 
-      answer:
-        aiResult.answer,
+      answer: aiResult.answer,
 
       transaction,
 
@@ -793,35 +787,20 @@ Before returning JSON, verify:
 
       visuals,
 
-      visual:
-        visuals.length > 0
-          ? visuals[0]
-          : null,
+      visual: visuals.length > 0 ? visuals[0] : null,
 
-      image:
-        visuals.length > 0
-          ? visuals[0].image
-          : null,
+      image: visuals.length > 0 ? visuals[0].image : null,
 
-      imageUrl:
-        visuals.length > 0
-          ? visuals[0].image
-          : null,
+      imageUrl: visuals.length > 0 ? visuals[0].image : null,
     });
   } catch (error) {
-    console.error(
-      "HIRE SAP AI ERROR:",
-      error
-    );
+    console.error("HIRE SAP AI ERROR:", error);
 
     return NextResponse.json(
       {
         success: false,
 
-        error:
-          error instanceof Error
-            ? error.message
-            : "AI service could not process the request.",
+        error: error instanceof Error ? error.message : "AI service could not process the request.",
       },
       {
         status: 500,

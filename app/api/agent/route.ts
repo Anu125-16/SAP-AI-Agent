@@ -9,9 +9,11 @@ const hf = new OpenAI({
 type VisualStep = {
   step: number;
   title: string;
+  searchQuery: string;
 };
 
 type ImageResult = {
+  position?: number;
   title?: string;
   thumbnail?: string;
   original?: string;
@@ -20,57 +22,12 @@ type ImageResult = {
   link?: string;
 };
 
-function extractTransaction(answer: string): string {
-  const transactionList = [
-    "MM01",
-    "MM02",
-    "MM03",
-    "ME21N",
-    "ME22N",
-    "ME23N",
-    "ME51N",
-    "ME52N",
-    "ME53N",
-    "MIGO",
-    "MIRO",
-    "FB50",
-    "FB60",
-    "VA01",
-    "VA02",
-    "VA03",
-    "VL01N",
-    "VL02N",
-    "VL03N",
-    "VF01",
-    "VF02",
-    "VF03",
-  ];
-
-  for (const transaction of transactionList) {
-    const regex = new RegExp("\\b" + transaction + "\\b", "i");
-
-    if (regex.test(answer)) {
-      return transaction;
-    }
-  }
-
-  return "";
-}
-
 function cleanJson(text: string): string {
   let result = text.trim();
 
-  if (result.startsWith("```json")) {
-    result = result.substring(7);
-  }
-
-  if (result.startsWith("```")) {
-    result = result.substring(3);
-  }
-
-  if (result.endsWith("```")) {
-    result = result.substring(0, result.length - 3);
-  }
+  result = result.replace(/^```json\s*/i, "");
+  result = result.replace(/^```\s*/i, "");
+  result = result.replace(/\s*```$/i, "");
 
   const firstBrace = result.indexOf("{");
   const lastBrace = result.lastIndexOf("}");
@@ -82,90 +39,119 @@ function cleanJson(text: string): string {
   return result.trim();
 }
 
-/*
-==================================================
-REMOVE MARKDOWN / SPECIAL FORMATTING
-==================================================
-*/
+function extractTransaction(answer: string): string {
+  const match = answer.match(/T[-\s]?code\s*[:=-]\s*([A-Z0-9/]+)/i);
 
-function cleanAnswer(text: string): string {
-  return text
-    .replace(/\*\*/g, "")
-    .replace(/\*/g, "")
-    .replace(/__/g, "")
-    .replace(/_/g, "")
-    .replace(/`/g, "")
-    .replace(/#{1,6}\s?/g, "")
-    .replace(/<[^>]*>/g, "")
-    .trim();
+  if (match?.[1]) {
+    return match[1].toUpperCase();
+  }
+
+  const fallback = answer.match(
+    /\b(MM01|MM02|MM03|ME21N|ME22N|ME23N|MIGO|MIRO|ME51N|ME52N|ME53N|FB60|FB50|VA01|VA02|VA03|VL01N|VL02N|VL03N|VF01|VF02|VF03)\b/i
+  );
+
+  return fallback?.[1]?.toUpperCase() || "";
 }
 
-/*
-==================================================
-CREATE EXACT GOOGLE IMAGE SEARCH QUERY
-==================================================
-
-IMPORTANT:
-
-The AI provides the exact step title.
-
-The server creates the Google search query.
-
-This prevents the AI from creating unrelated image searches.
-*/
-
-function createImageSearchQuery(
+function fallbackSearchQuery(
   sapModule: string,
   transaction: string,
   title: string
 ): string {
-  const cleanTitle = title
-    .replace(/[^\w\s&-]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return [
-    "SAP",
-    sapModule,
-    transaction,
-    cleanTitle,
-    "SAP GUI",
-    "screen",
-    "screenshot",
-  ]
+  return ["SAP", sapModule, transaction, title, "SAP GUI", "screen", "screenshot"]
     .filter(Boolean)
     .join(" ");
 }
 
 /*
 ==================================================
-SEARCH GOOGLE IMAGES USING SERPAPI
+IMAGE RELEVANCE FIX
 ==================================================
+
+PURANI CODE (jo humne dekha) sirf pehli image le leta tha
+jisme koi bhi image field (original/thumbnail) mojood ho -
+bina ye check kiye ki image actually is SAP step se match
+karti hai ya nahi. Isi wajah se galat images (jaise ABAP
+debugger, unrelated tutorials) dikh rahi thi.
+
+NAYA CODE:
+1. Negative keywords wali images (debugger, source code,
+   workbench, etc.) turant reject karta hai.
+2. Har image ko score deta hai based on kitne keywords
+   match hote hain query se.
+3. Sirf tabhi image deta hai jab best score kam se kam
+   MIN_ACCEPTABLE_SCORE ho, warna null return karta hai
+   (matlab is step ke liye koi image nahi dikhegi - jo
+   galat image dikhane se hamesha behtar hai).
 */
 
-async function searchGoogleImages(
-  query: string
-): Promise<ImageResult[]> {
+const MIN_ACCEPTABLE_SCORE = 5;
+
+const NEGATIVE_KEYWORDS = [
+  "debugger",
+  "abap editor",
+  "abap program",
+  "source code",
+  "class builder",
+  "breakpoint",
+  "watchpoint",
+  "workbench",
+  "developer",
+];
+
+function scoreImage(image: ImageResult, query: string): number {
+  const combined = [image.title || "", image.source || "", image.link || ""]
+    .join(" ")
+    .toLowerCase();
+
+  if (NEGATIVE_KEYWORDS.some((kw) => combined.includes(kw))) {
+    return -100;
+  }
+
+  const queryWords = query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w.length > 3 && w !== "screenshot" && w !== "screen");
+
+  let score = 0;
+
+  for (const word of queryWords) {
+    if (combined.includes(word)) {
+      score += 2;
+    }
+  }
+
+  if (combined.includes("sap")) {
+    score += 3;
+  }
+
+  if (image.original || image.thumbnail || image.serpapi_thumbnail) {
+    score += 1;
+  }
+
+  return score;
+}
+
+async function searchGoogleImage(query: string): Promise<ImageResult | null> {
   const apiKey = process.env.SERPAPI_KEY;
 
   if (!apiKey) {
-    console.error("SERPAPI_KEY is missing.");
-    return [];
+    console.error("SERPAPI_KEY is missing from .env.local");
+    return null;
   }
 
   try {
-    const params = new URLSearchParams();
+    const params = new URLSearchParams({
+      engine: "google_images",
+      q: query,
+      api_key: apiKey,
+      google_domain: "google.com",
+      hl: "en",
+      gl: "us",
+      device: "desktop",
+    });
 
-    params.set("engine", "google_images");
-    params.set("q", query);
-    params.set("api_key", apiKey);
-    params.set("google_domain", "google.com");
-    params.set("hl", "en");
-    params.set("gl", "us");
-    params.set("device", "desktop");
-
-    const url =
-      "https://serpapi.com/search.json?" + params.toString();
+    const url = "https://serpapi.com/search.json?" + params.toString();
 
     const response = await fetch(url, {
       method: "GET",
@@ -173,150 +159,212 @@ async function searchGoogleImages(
     });
 
     if (!response.ok) {
-      console.error(
-        "SerpApi HTTP error:",
-        response.status
-      );
-
-      return [];
+      console.error("SerpApi HTTP error:", response.status);
+      return null;
     }
 
     const data = await response.json();
 
     if (data.error) {
-      console.error(
-        "SerpApi returned error:",
-        data.error
-      );
-
-      return [];
+      console.error("SerpApi error:", data.error);
+      return null;
     }
 
-    const images = data.images_results || [];
+    const images: ImageResult[] = data.images_results || [];
 
-    if (!Array.isArray(images)) {
-      return [];
+    if (!images.length) {
+      console.log("No Google images found for:", query);
+      return null;
     }
 
-    return images;
-  } catch (error) {
-    console.error(
-      "Google image search failed:",
-      error
-    );
+    // FIX: score every candidate image and reject bad matches,
+    // instead of blindly taking the first one with an image field.
+    let bestImage: ImageResult | null = null;
+    let bestScore = -1;
 
-    return [];
-  }
-}
+    for (const image of images) {
+      if (!(image.original || image.thumbnail || image.serpapi_thumbnail)) {
+        continue;
+      }
 
-/*
-==================================================
-SELECT BEST IMAGE
-==================================================
+      const score = scoreImage(image, query);
 
-We prefer images whose title/source contains
-SAP or the transaction code.
-*/
-
-function selectBestImage(
-  images: ImageResult[],
-  transaction: string,
-  title: string
-): ImageResult | null {
-  if (!images.length) {
-    return null;
-  }
-
-  const keywords = [
-    transaction.toLowerCase(),
-    ...title
-      .toLowerCase()
-      .split(/\s+/)
-      .filter((word) => word.length > 3),
-  ];
-
-  let bestImage: ImageResult | null = null;
-  let bestScore = -1;
-
-  for (const image of images) {
-    const combined = [
-      image.title || "",
-      image.source || "",
-      image.link || "",
-    ]
-      .join(" ")
-      .toLowerCase();
-
-    let score = 0;
-
-    for (const keyword of keywords) {
-      if (combined.includes(keyword)) {
-        score += 2;
+      if (score > bestScore) {
+        bestScore = score;
+        bestImage = image;
       }
     }
 
-    if (combined.includes("sap")) {
-      score += 3;
+    if (!bestImage || bestScore < MIN_ACCEPTABLE_SCORE) {
+      console.log(
+        "IMAGE REJECTED - best score too low:",
+        bestScore,
+        "for query:",
+        query
+      );
+      return null;
     }
 
-    if (combined.includes(transaction.toLowerCase())) {
-      score += 5;
-    }
-
-    if (
-      image.original ||
-      image.thumbnail ||
-      image.serpapi_thumbnail
-    ) {
-      score += 1;
-    }
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestImage = image;
-    }
+    return bestImage;
+  } catch (error) {
+    console.error("SerpApi image search error:", error);
+    return null;
   }
-
-  return bestImage || images[0] || null;
 }
 
-/*
-==================================================
-AI INSTRUCTIONS
-==================================================
-*/
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
 
-function buildInstructions(
-  sapModule: string
-): string {
-  return `
+    const message = body.message || body.question || body.prompt || "";
+
+    const sapModule = body.sapModule || "SAP";
+
+    if (typeof message !== "string" || !message.trim()) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Message is required",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    /*
+    ==================================================
+    AI ANSWER + EXACT VISUAL STEPS
+    ==================================================
+    */
+
+    const response = await hf.responses.create({
+      model: "openai/gpt-oss-120b:groq",
+
+      instructions: `
 You are HireSAP AI, a professional SAP How-To Assistant.
 
-Selected SAP module: ${sapModule}
+Selected SAP module:
+${sapModule}
 
-Your task is to answer the user's SAP question and create
-a visual guide with accurate SAP procedure step names.
+User question:
+${message}
+
+Your job is to create:
+
+1. A simple and accurate SAP answer.
+2. Exact visual steps for the important procedure steps.
+3. A specific Google Images search query for every visual step.
+
+==================================================
+EXPLAIN LIKE A COMPLETE BEGINNER
+==================================================
+
+The reader has ZERO SAP background. Write so that even someone who
+has never opened SAP GUI can follow along and do it themselves.
+
+Rules:
+- Use very short sentences. One idea per sentence.
+- Before jumping into steps, add one line explaining WHAT this
+  activity means in plain, everyday words (no SAP jargon).
+- When you use a technical word for the first time (like "T-code",
+  "G/L account", "posting"), explain it in 4-6 simple words right
+  after it, in brackets.
+- Avoid stacking multiple instructions in one sentence.
+- Use everyday comparisons where it helps
+  (example: "A journal entry is like writing in a diary that money
+  moved from one account to another").
+- Never assume the reader already knows what a screen, field, or
+  button looks like - describe it.
+
+==================================================
+RETURN FORMAT
+==================================================
+
+Return ONLY valid JSON.
+
+Do not return Markdown code fences.
+
+Use exactly this structure:
+
+{
+  "answer": "T-code: MM01\\n\\n1. Enter Transaction - Open SAP GUI, type MM01 in the command field and press Enter.",
+  "visualSteps": [
+    {
+      "step": 1,
+      "title": "Enter Transaction",
+      "searchQuery": "SAP MM01 Enter Transaction SAP GUI command field screen screenshot"
+    }
+  ]
+}
 
 ==================================================
 ANSWER FORMAT
 ==================================================
 
-Use simple and clear plain text.
+The answer MUST use simple plain text.
+
+Do NOT use Markdown formatting.
 
 Do NOT use:
 
-Markdown
-Bold symbols
-Italic symbols
-Backticks
+**
+*
+backticks
+Markdown bold
+Markdown italic
+Markdown code formatting
 HTML
-Special formatting symbols
 
-Use normal numbered steps.
+Do not use Markdown tables unless the user specifically asks for a table.
 
-Use normal hyphens for field lists.
+Do not write:
 
-The answer must look like this:
+**T-code:** MM01
+
+Write:
+
+T-code: MM01
+
+Do not write:
+
+1. **Enter Transaction** - Open SAP GUI.
+
+Write:
+
+1. Enter Transaction - Open SAP GUI.
+
+Use normal hyphens.
+
+Use simple numbered steps.
+
+==================================================
+HOW-TO QUESTIONS
+==================================================
+
+When the user asks how to perform an SAP activity:
+
+Start with:
+
+T-code: XXXX
+
+Then provide practical numbered steps.
+
+Use approximately 6 to 10 steps when appropriate.
+
+Every step must describe a real action.
+
+Keep the answer simple and professional.
+
+==================================================
+EXAMPLE
+==================================================
+
+For:
+
+How do I create a Material in SAP MM?
+
+Use a structure similar to:
 
 T-code: MM01
 
@@ -353,244 +401,283 @@ T-code: MM01
 9. Save the Material - Click Save. SAP will create the material master record and display the material number.
 
 ==================================================
-VISUAL GUIDE
+VISUAL STEP RULE
 ==================================================
 
-Create visualSteps for the most important visual screens.
+This is very important.
 
-IMPORTANT:
+The visual step title must closely match the exact step name used in the answer.
 
-Use EXACTLY the same step title as the procedure.
+Example:
 
-For example:
+Answer:
 
-Procedure:
-
-1. Enter Transaction - Open SAP GUI, type MM01 in the command field and press Enter.
+1. Enter Transaction - Open SAP GUI and type MM01.
 
 Visual step:
 
 {
   "step": 1,
-  "title": "Enter Transaction"
+  "title": "Enter Transaction",
+  "searchQuery": "SAP MM01 Enter Transaction SAP GUI command field screenshot"
 }
 
-Do not create a different title.
+Do not create generic titles such as:
 
-The visual step title must describe the actual SAP screen.
+MM01 Tutorial
 
-Prefer 4 to 5 important visual steps.
+SAP MM Tutorial
 
-For a material creation process, good visual steps could be:
+SAP Material Master
 
-1. Enter Transaction
+Instead use the actual step name.
 
-2. Select Industry Sector, Material Type & Views
+==================================================
+GOOGLE IMAGE SEARCH
+==================================================
 
-3. Enter Basic Data 1
+Every important procedure step should have its own image search.
 
-4. Maintain Purchasing View
+The search query must be specific to the exact SAP screen.
 
-5. Maintain Accounting View
+Bad search:
 
-OR:
+SAP MM tutorial
 
-1. Enter Transaction
+Bad search:
 
-2. Select Industry Sector, Material Type & Views
+SAP MM01 screenshot
 
-3. Enter Basic Data 1
+Good search:
 
-4. Maintain MRP Views
+SAP MM01 Create Material initial screen Enter Transaction SAP GUI screenshot
 
-5. Save the Material
+Good search:
 
-Choose the most useful screens for the user's question.
+SAP MM01 Industry Sector Material Type Select Views SAP GUI screenshot
+
+Good search:
+
+SAP MM01 Basic Data 1 Material Description Base Unit Material Group SAP GUI screenshot
+
+Good search:
+
+SAP MM01 Basic Data 2 Gross Weight Net Weight Volume SAP GUI screenshot
+
+Good search:
+
+SAP MM01 Purchasing View Plant Purchasing Group Order Unit SAP GUI screenshot
+
+Good search:
+
+SAP MM01 Accounting View Valuation Class Price Control Standard Price SAP GUI screenshot
+
+Good search:
+
+SAP MM01 MRP View MRP Type Lot Size MRP Controller Safety Stock SAP GUI screenshot
+
+Good search:
+
+SAP MM01 Check Material Master SAP GUI screenshot
+
+Good search:
+
+SAP MM01 Save Material Master SAP GUI material number screenshot
+
+==================================================
+IMAGE ACCURACY
+==================================================
+
+The Google search query must contain the exact information needed to find the relevant SAP screen.
+
+Include when applicable:
+
+SAP
+SAP module
+Transaction code
+Exact screen
+Exact view
+Important fields
+SAP GUI
+Screenshot
+
+Do not search unrelated SAP transactions.
+
+For example:
+
+MM01 Accounting View should search for MM01 Accounting View.
+
+Do not search for MIGO.
+
+==================================================
+NUMBER OF VISUALS
+==================================================
+
+Create visual steps for all important procedure steps.
+
+If there are 6 important steps, create 6 visual steps.
+
+If there are 7 important steps, create 7 visual steps.
+
+If there are 8 important steps, create 8 visual steps.
+
+If there are 9 important steps, create 9 visual steps.
+
+Do not artificially limit the guide to 4 or 5 images.
+
+==================================================
+SIMPLE QUESTIONS
+==================================================
+
+For questions such as:
+
+What is SAP MM?
+
+Give a short definition.
+
+Use:
+
+"visualSteps": []
+
+Do not search Google Images unless a visual is genuinely useful.
+
+==================================================
+T-CODE QUESTIONS
+==================================================
+
+If the user asks:
+
+What is MM01?
+
+Answer with the meaning of the transaction code.
+
+Example:
+
+T-code: MM01
+
+MM01 is used to create a Material Master record in SAP.
+
+Do not create unnecessary images.
+
+==================================================
+CONFIGURATION QUESTIONS
+==================================================
+
+For configuration questions:
+
+Explain configuration separately from end-user processing.
+
+Use simple numbered steps.
+
+Do not invent an SPRO path.
+
+If the exact configuration path depends on SAP version or customer configuration, clearly state that.
+
+==================================================
+TROUBLESHOOTING
+==================================================
+
+For troubleshooting questions:
+
+1. Check the error.
+2. Check master data.
+3. Check configuration.
+4. Check document data.
+5. Apply the solution.
+
+Keep it practical.
+
+==================================================
+SUPPORTED SAP MODULES
+==================================================
+
+SAP MM
+SAP FICO
+SAP SD
+SAP PP
+SAP ABAP
+SAP HANA
+SAP Basis
+SAP EWM
+SAP TM
+SAP GTS
+SAP WM
+SAP SuccessFactors
+SAP Concur
+Other SAP modules when possible.
 
 ==================================================
 ACCURACY
 ==================================================
 
-Do not invent transaction codes.
+Do not invent T-codes.
 
-Do not invent SAP screens.
+Do not invent SPRO paths.
 
-Do not invent configuration paths.
+Distinguish SAP ECC and SAP S/4HANA when relevant.
 
-Use SAP terminology.
-
-If the process depends on customer configuration,
-clearly mention that.
+If a process depends on customer configuration, say so.
 
 ==================================================
-JSON FORMAT
+FINAL CHECK
 ==================================================
 
-Return ONLY valid JSON.
+Before returning JSON, verify:
 
-Use this exact structure:
+1. The answer contains plain text.
+2. No Markdown formatting is used.
+3. No backticks are used.
+4. T-code is written as plain text.
+5. Numbered steps are clear.
+6. Visual titles match the step names.
+7. Google search queries match the exact SAP screens.
+8. Every important visual step has a search query.
+9. The JSON is valid.
+`,
 
-{
-  "answer": "T-code: MM01\\n\\n1. Enter Transaction - Open SAP GUI, type MM01 in the command field and press Enter.",
-  "visualSteps": [
-    {
-      "step": 1,
-      "title": "Enter Transaction"
-    },
-    {
-      "step": 2,
-      "title": "Select Industry Sector, Material Type & Views"
-    },
-    {
-      "step": 3,
-      "title": "Enter Basic Data 1"
-    },
-    {
-      "step": 4,
-      "title": "Maintain Purchasing View"
-    },
-    {
-      "step": 5,
-      "title": "Maintain Accounting View"
-    }
-  ]
-}
+      input: message,
+    });
 
-IMPORTANT:
-
-Do NOT include searchQuery.
-
-The application will create the Google image search query automatically
-from the exact step title.
-
-Do not put JSON inside Markdown code fences.
-`;
-}
-
-/*
-==================================================
-POST
-==================================================
-*/
-
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
-
-    const message =
-      body.message ||
-      body.question ||
-      body.prompt ||
-      "";
-
-    const sapModule =
-      body.sapModule || "SAP MM";
-
-    if (
-      typeof message !== "string" ||
-      !message.trim()
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Message is required.",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
-
-    console.log(
-      "SAP QUESTION:",
-      message
-    );
+    const rawOutput = response.output_text || "";
 
     /*
-    ================================================
-    STEP 1
-    AI CREATES ANSWER + EXACT STEP NAMES
-    ================================================
+    ==================================================
+    PARSE AI JSON
+    ==================================================
     */
 
-    const response =
-      await hf.responses.create({
-        model:
-          "openai/gpt-oss-120b:groq",
-
-        instructions:
-          buildInstructions(
-            sapModule
-          ),
-
-        input: message,
-      });
-
-    const rawOutput =
-      response.output_text || "";
-
-    console.log(
-      "RAW AI RESPONSE:",
-      rawOutput
-    );
-
-    /*
-    ================================================
-    STEP 2
-    PARSE JSON
-    ================================================
-    */
-
-    let result: {
+    let aiResult: {
       answer: string;
       visualSteps: VisualStep[];
     };
 
     try {
-      const jsonText =
-        cleanJson(rawOutput);
+      const cleaned = cleanJson(rawOutput);
 
-      result =
-        JSON.parse(jsonText);
+      aiResult = JSON.parse(cleaned);
 
-      if (
-        typeof result.answer !==
-        "string"
-      ) {
-        throw new Error(
-          "AI answer is missing."
-        );
+      if (!aiResult.answer || typeof aiResult.answer !== "string") {
+        throw new Error("AI did not return a valid answer.");
       }
 
-      if (
-        !Array.isArray(
-          result.visualSteps
-        )
-      ) {
-        result.visualSteps = [];
+      if (!Array.isArray(aiResult.visualSteps)) {
+        aiResult.visualSteps = [];
       }
     } catch (error) {
-      console.error(
-        "JSON PARSE ERROR:",
-        error
-      );
+      console.error("AI JSON PARSE ERROR:", error);
+
+      console.error("RAW AI RESPONSE:", rawOutput);
 
       return NextResponse.json({
         success: true,
 
-        answer:
-          cleanAnswer(
-            rawOutput
-          ),
+        answer: rawOutput || "Unable to generate an answer.",
 
-        transaction:
-          extractTransaction(
-            rawOutput
-          ),
-
-        visualSteps: [],
+        transaction: extractTransaction(rawOutput),
 
         visuals: [],
+
+        visualSteps: [],
 
         visual: null,
 
@@ -601,209 +688,98 @@ export async function POST(req: Request) {
     }
 
     /*
-    ================================================
-    STEP 3
-    CLEAN ANSWER
-    ================================================
+    ==================================================
+    TRANSACTION
+    ==================================================
     */
 
-    const answer =
-      cleanAnswer(
-        result.answer
-      );
+    const transaction = extractTransaction(aiResult.answer);
 
     /*
-    ================================================
-    STEP 4
-    FIND TRANSACTION
-    ================================================
+    ==================================================
+    CLEAN VISUAL STEPS
+    ==================================================
     */
 
-    const transaction =
-      extractTransaction(
-        answer
-      );
+    const visualSteps = aiResult.visualSteps
+      .filter(
+        (item) =>
+          item && typeof item.step === "number" && typeof item.title === "string"
+      )
+      .map((item) => ({
+        step: item.step,
+
+        title: item.title.trim(),
+
+        searchQuery: (
+          item.searchQuery || fallbackSearchQuery(sapModule, transaction, item.title)
+        ).trim(),
+      }));
+
+    console.log("AI VISUAL STEPS:", visualSteps);
 
     /*
-    ================================================
-    STEP 5
-    PREPARE EXACT VISUAL STEPS
-    ================================================
+    ==================================================
+    SEARCH GOOGLE IMAGES
+    ==================================================
     */
 
-    let visualSteps =
-      result.visualSteps
-        .filter(
-          (item) =>
-            item &&
-            typeof item.step ===
-              "number" &&
-            typeof item.title ===
-              "string"
-        )
-        .map(
-          (item) => ({
-            step: item.step,
-            title:
-              item.title
-                .trim()
-                .replace(
-                  /^[0-9]+[.)-]\s*/,
-                  ""
-                ),
-          })
-        )
-        .filter(
-          (item) =>
-            item.title.length > 0
-        );
+    const visualResults = await Promise.all(
+      visualSteps.map(async (step) => {
+        const image = await searchGoogleImage(step.searchQuery);
 
-    /*
-    ================================================
-    LIMIT TO MAXIMUM 5 VISUALS
-    ================================================
-    */
+        if (!image) {
+          return null;
+        }
 
-    visualSteps =
-      visualSteps.slice(0, 5);
+        const imageUrl = image.original || image.thumbnail || image.serpapi_thumbnail || "";
 
-    console.log(
-      "EXACT VISUAL STEPS:",
-      visualSteps
+        const fallbackImage = image.thumbnail || image.serpapi_thumbnail || image.original || "";
+
+        if (!imageUrl) {
+          return null;
+        }
+
+        return {
+          step: step.step,
+
+          title: step.title,
+
+          query: step.searchQuery,
+
+          image: imageUrl,
+
+          fallbackImage,
+
+          thumbnail: fallbackImage,
+
+          source: image.source || "Google Images",
+
+          sourceUrl: image.link || "",
+
+          transaction,
+        };
+      })
     );
 
-    /*
-    ================================================
-    STEP 6
-    GOOGLE IMAGE SEARCH
-
-    The important change is here.
-
-    We DO NOT use an AI generated searchQuery.
-
-    We create the query ourselves from the
-    exact visual step title.
-    ================================================
-    */
-
-    const visualResults =
-      await Promise.all(
-        visualSteps.map(
-          async (step) => {
-            const searchQuery =
-              createImageSearchQuery(
-                sapModule,
-                transaction,
-                step.title
-              );
-
-            console.log(
-              "GOOGLE IMAGE SEARCH:",
-              searchQuery
-            );
-
-            const images =
-              await searchGoogleImages(
-                searchQuery
-              );
-
-            const image =
-              selectBestImage(
-                images,
-                transaction,
-                step.title
-              );
-
-            if (!image) {
-              console.log(
-                "NO IMAGE FOUND:",
-                searchQuery
-              );
-
-              return null;
-            }
-
-            const imageUrl =
-              image.original ||
-              image.thumbnail ||
-              image.serpapi_thumbnail ||
-              "";
-
-            const fallbackImage =
-              image.thumbnail ||
-              image.serpapi_thumbnail ||
-              image.original ||
-              "";
-
-            if (!imageUrl) {
-              return null;
-            }
-
-            return {
-              step:
-                step.step,
-
-              title:
-                step.title,
-
-              query:
-                searchQuery,
-
-              image:
-                imageUrl,
-
-              fallbackImage,
-
-              thumbnail:
-                fallbackImage,
-
-              source:
-                image.source ||
-                "Google Images",
-
-              sourceUrl:
-                image.link ||
-                "",
-
-              transaction,
-            };
-          }
-        )
-      );
-
-    /*
-    ================================================
-    STEP 7
-    REMOVE FAILED IMAGES
-    ================================================
-    */
-
-    const visuals =
-      visualResults.filter(
-        (
-          item
-        ): item is NonNullable<
-          typeof item
-        > =>
-          item !== null
-      );
-
-    console.log(
-      "FINAL VISUAL COUNT:",
-      visuals.length
+    const visuals = visualResults.filter(
+      (item): item is NonNullable<typeof item> => item !== null
     );
 
+    console.log("FINAL VISUAL COUNT:", visuals.length);
+
+    console.log("FINAL VISUALS:", visuals);
+
     /*
-    ================================================
-    STEP 8
-    RETURN RESULT
-    ================================================
+    ==================================================
+    RETURN TO FRONTEND
+    ==================================================
     */
 
     return NextResponse.json({
       success: true,
 
-      answer,
+      answer: aiResult.answer,
 
       transaction,
 
@@ -811,35 +787,20 @@ export async function POST(req: Request) {
 
       visuals,
 
-      visual:
-        visuals.length > 0
-          ? visuals[0]
-          : null,
+      visual: visuals.length > 0 ? visuals[0] : null,
 
-      image:
-        visuals.length > 0
-          ? visuals[0].image
-          : null,
+      image: visuals.length > 0 ? visuals[0].image : null,
 
-      imageUrl:
-        visuals.length > 0
-          ? visuals[0].image
-          : null,
+      imageUrl: visuals.length > 0 ? visuals[0].image : null,
     });
   } catch (error) {
-    console.error(
-      "HIRE SAP AI ERROR:",
-      error
-    );
+    console.error("HIRE SAP AI ERROR:", error);
 
     return NextResponse.json(
       {
         success: false,
 
-        error:
-          error instanceof Error
-            ? error.message
-            : "AI service could not process the request.",
+        error: error instanceof Error ? error.message : "AI service could not process the request.",
       },
       {
         status: 500,
