@@ -110,6 +110,23 @@ function detectEffectiveModule(
   message: string,
   selectedModule: string
 ): string {
+  // FIX: agar user ne SAP ke alawa koi doosra ERP system select
+  // kiya hai (Tally, Zoho Books, Odoo, waghera), to keyword-based
+  // SAP routing bilkul skip karo - warna "journal entry" jaisa
+  // keyword hamesha "FI" (SAP) return kar deta tha, chahe user ne
+  // Tally select kiya ho.
+  const nonSapSystems = [
+    "Tally",
+    "Zoho Books",
+    "Odoo",
+    "Oracle ERP",
+    "Microsoft Dynamics 365",
+  ];
+
+  if (nonSapSystems.includes(selectedModule)) {
+    return selectedModule;
+  }
+
   const q = message.toLowerCase();
 
   if (
