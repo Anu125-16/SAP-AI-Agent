@@ -18,7 +18,7 @@ metadata se guarantee nahi hoti).
 */
 
 export const metadata: Metadata = {
-  title: "HireSAP AI - Learn SAP Free | SAP Tutor & Step-by-Step Guide",
+  title: "ERP Tutor AI - Learn SAP Free | SAP Tutor & Step-by-Step Guide",
   description:
     "Free AI-powered SAP tutor. Learn SAP MM, FICO, SD, ABAP and more with step-by-step answers and real SAP screenshots. Perfect for SAP learners preparing for interviews or jobs.",
   keywords: [
@@ -33,11 +33,11 @@ export const metadata: Metadata = {
     "SAP AI assistant",
   ],
   openGraph: {
-    title: "HireSAP AI - Learn SAP Free with an AI Tutor",
+    title: "ERP Tutor AI - Learn SAP Free with an AI Tutor",
     description:
       "Ask any SAP question and get step-by-step answers with real screenshots. Covers MM, FICO, SD, ABAP, and more.",
     url: "https://sap-ai-agent.vercel.app",
-    siteName: "HireSAP AI",
+    siteName: "ERP Tutor AI",
     type: "website",
   },
 };

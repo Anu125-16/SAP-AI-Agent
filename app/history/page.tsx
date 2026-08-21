@@ -3,6 +3,18 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+/*
+==================================================
+HOW TO USE THIS FILE
+==================================================
+
+1. Naya folder banao: app/history
+2. Is file ko us folder ke andar 'page.tsx' naam se save karo.
+   Final path: app/history/page.tsx
+3. Save, commit, push, deploy karo (jaisa pehle karte the).
+4. Ye page yahan open hoga: yoursite.com/history
+*/
+
 type HistoryEntry = {
   question: string;
   answer: string;
@@ -37,7 +49,7 @@ export default function HistoryPage() {
       <header className="border-b border-cyan-900/40 px-6 py-5">
         <div className="mx-auto flex max-w-4xl items-center justify-between">
           <Link href="/Agent" className="text-xl font-bold text-cyan-400">
-            HireSAP AI
+            ERP Tutor AI
           </Link>
 
           <div className="flex gap-3">

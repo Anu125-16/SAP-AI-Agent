@@ -78,7 +78,7 @@ export default function AboutPage() {
       <header className="border-b border-cyan-900/40 px-6 py-5">
         <div className="mx-auto flex max-w-6xl items-center justify-between">
           <div>
-            <span className="text-xl font-bold text-cyan-400">HireSAP AI</span>
+            <span className="text-xl font-bold text-cyan-400">ERP Tutor AI</span>
             <p className="text-xs text-slate-500">by SAP Learner</p>
           </div>
 
@@ -100,7 +100,7 @@ export default function AboutPage() {
         </h1>
 
         <p className="mx-auto mt-6 max-w-2xl text-lg text-slate-400">
-          HireSAP AI is a free SAP how-to assistant. Ask any question about
+          ERP Tutor AI is a free SAP how-to assistant. Ask any question about
           SAP MM, FICO, SD, ABAP, or other modules, and get a simple,
           beginner-friendly answer with the exact steps and real SAP
           screens - no SAP system access required.
@@ -129,7 +129,7 @@ export default function AboutPage() {
             systems cost thousands of rupees to access, tutorials assume
             you already know the jargon, and it's hard to know what a
             screen actually looks like before an interview or your first
-            day on the job. HireSAP AI exists to close that gap - a free,
+            day on the job. ERP Tutor AI exists to close that gap - a free,
             instant guide that explains any SAP process in plain language
             and shows you the real screen for every step.
           </p>
@@ -208,11 +208,11 @@ export default function AboutPage() {
       <section className="border-t border-cyan-900/40 bg-[#0b1326] px-6 py-16">
         <div className="mx-auto max-w-3xl text-center">
           <h2 className="text-2xl font-bold text-white md:text-3xl">
-            About HireSAP AI
+            About ERP Tutor AI
           </h2>
 
           <p className="mt-4 text-slate-400">
-            HireSAP AI is built by SAP Learner, founded by Anurag Tiwari,
+            ERP Tutor AI is built by SAP Learner, founded by Anurag Tiwari,
             with the goal of making SAP education accessible to everyone,
             not just people who can afford expensive corporate training.
             We believe anyone preparing for an SAP career or an SAP
@@ -229,7 +229,7 @@ export default function AboutPage() {
 
       {/* ============ FOOTER ============ */}
       <footer className="border-t border-cyan-900/40 px-6 py-8 text-center text-xs text-slate-500">
-        © {new Date().getFullYear()} HireSAP AI by SAP Learner (Anurag Tiwari). All rights reserved.
+        © {new Date().getFullYear()} ERP Tutor AI by SAP Learner (Anurag Tiwari). All rights reserved.
       </footer>
     </main>
   );

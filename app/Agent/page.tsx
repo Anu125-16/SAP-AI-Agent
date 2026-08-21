@@ -355,7 +355,7 @@ export default function AgentPage() {
 
         <aside className="hidden h-full w-[270px] shrink-0 overflow-y-auto border-r border-cyan-900/40 bg-[#0b1326] p-5 lg:block">
           <div className="mb-8">
-            <h1 className="text-2xl font-bold text-cyan-400">HireSAP AI</h1>
+            <h1 className="text-2xl font-bold text-cyan-400">ERP Tutor AI</h1>
 
             <p className="mt-2 text-sm text-slate-400">
               SAP Visual Assistant
@@ -417,7 +417,7 @@ export default function AgentPage() {
             <div className="flex items-center justify-between gap-4">
               <div>
                 <h2 className="text-xl font-bold text-white">
-                  SAP AI Assistant
+                  ERP Tutor AI Assistant
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-400">
@@ -452,7 +452,7 @@ export default function AgentPage() {
                 </Link>
 
                 <Link
-                  href="/about"
+                  href="/About"
                   className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-cyan-400 hover:text-cyan-400"
                 >
                   About
