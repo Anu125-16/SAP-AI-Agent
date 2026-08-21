@@ -9,11 +9,9 @@ const hf = new OpenAI({
 type VisualStep = {
   step: number;
   title: string;
-  searchQuery: string;
 };
 
 type ImageResult = {
-  position?: number;
   title?: string;
   thumbnail?: string;
   original?: string;
@@ -22,12 +20,57 @@ type ImageResult = {
   link?: string;
 };
 
+function extractTransaction(answer: string): string {
+  const transactionList = [
+    "MM01",
+    "MM02",
+    "MM03",
+    "ME21N",
+    "ME22N",
+    "ME23N",
+    "ME51N",
+    "ME52N",
+    "ME53N",
+    "MIGO",
+    "MIRO",
+    "FB50",
+    "FB60",
+    "VA01",
+    "VA02",
+    "VA03",
+    "VL01N",
+    "VL02N",
+    "VL03N",
+    "VF01",
+    "VF02",
+    "VF03",
+  ];
+
+  for (const transaction of transactionList) {
+    const regex = new RegExp("\\b" + transaction + "\\b", "i");
+
+    if (regex.test(answer)) {
+      return transaction;
+    }
+  }
+
+  return "";
+}
+
 function cleanJson(text: string): string {
   let result = text.trim();
 
-  result = result.replace(/^```json\s*/i, "");
-  result = result.replace(/^```\s*/i, "");
-  result = result.replace(/\s*```$/i, "");
+  if (result.startsWith("```json")) {
+    result = result.substring(7);
+  }
+
+  if (result.startsWith("```")) {
+    result = result.substring(3);
+  }
+
+  if (result.endsWith("```")) {
+    result = result.substring(0, result.length - 3);
+  }
 
   const firstBrace = result.indexOf("{");
   const lastBrace = result.lastIndexOf("}");
@@ -39,50 +82,174 @@ function cleanJson(text: string): string {
   return result.trim();
 }
 
-function extractTransaction(answer: string): string {
-  const match = answer.match(/T[-\s]?code\s*[:=-]\s*([A-Z0-9/]+)/i);
+/*
+==================================================
+REMOVE MARKDOWN / SPECIAL FORMATTING
+==================================================
+*/
 
-  if (match?.[1]) {
-    return match[1].toUpperCase();
-  }
-
-  const fallback = answer.match(
-    /\b(MM01|MM02|MM03|ME21N|ME22N|ME23N|MIGO|MIRO|ME51N|ME52N|ME53N|FB60|FB50|VA01|VA02|VA03|VL01N|VL02N|VL03N|VF01|VF02|VF03)\b/i
-  );
-
-  return fallback?.[1]?.toUpperCase() || "";
-}
-
-function fallbackSearchQuery(
-  sapModule: string,
-  transaction: string,
-  title: string
-): string {
-  return ["SAP", sapModule, transaction, title, "SAP GUI", "screen", "screenshot"]
-    .filter(Boolean)
-    .join(" ");
+function cleanAnswer(text: string): string {
+  return text
+    .replace(/\*\*/g, "")
+    .replace(/\*/g, "")
+    .replace(/__/g, "")
+    .replace(/_/g, "")
+    .replace(/`/g, "")
+    .replace(/#{1,6}\s?/g, "")
+    .replace(/<[^>]*>/g, "")
+    .trim();
 }
 
 /*
 ==================================================
-IMAGE RELEVANCE FIX
+CREATE EXACT GOOGLE IMAGE SEARCH QUERY
+==================================================
+*/
+
+function detectEffectiveModule(
+  message: string,
+  selectedModule: string
+): string {
+  const q = message.toLowerCase();
+
+  if (
+    /\b(journal entry|journal entries|g\/l|general ledger|gl posting|g\/l posting|debit and credit|debit.*credit|credit.*debit)\b/.test(q)
+  ) {
+    return "FI";
+  }
+
+  if (
+    /\b(vendor invoice|customer invoice|accounts payable|accounts receivable|bank posting|payment run|automatic payment|fb50|fb60|f-02)\b/.test(q)
+  ) {
+    return "FI";
+  }
+
+  if (
+    /\b(purchase requisition|purchase request|purchase order|po\b|goods receipt|material master|vendor master|invoice verification|migo|miro|me21n|me51n|mm01)\b/.test(q)
+  ) {
+    return "MM";
+  }
+
+  if (
+    /\b(sales order|delivery|picking|packing|post goods issue|billing document|va01|vl01n|vf01)\b/.test(q)
+  ) {
+    return "SD";
+  }
+
+  if (
+    /\b(production order|mrp|material requirements planning|capacity planning|production planning)\b/.test(q)
+  ) {
+    return "PP";
+  }
+
+  if (
+    /\b(cost center|internal order|profit center|controlling|co\b)\b/.test(q)
+  ) {
+    return "CO";
+  }
+
+  return selectedModule.replace(/^SAP\s+/i, "").trim();
+}
+
+function createImageSearchQuery(
+  effectiveModule: string,
+  transaction: string,
+  title: string
+): string {
+  const cleanTitle = title
+    .replace(/[^\w\s&-]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const parts = [
+    "SAP",
+    effectiveModule,
+    transaction,
+    cleanTitle,
+    "SAP GUI",
+    "screen",
+    "screenshot",
+  ].filter(Boolean);
+
+  return parts.join(" ");
+}
+
+/*
+==================================================
+SEARCH GOOGLE IMAGES USING SERPAPI
+==================================================
+*/
+
+async function searchGoogleImages(
+  query: string
+): Promise<ImageResult[]> {
+  const apiKey = process.env.SERPAPI_KEY;
+
+  if (!apiKey) {
+    console.error("SERPAPI_KEY is missing.");
+    return [];
+  }
+
+  try {
+    const params = new URLSearchParams();
+
+    params.set("engine", "google_images");
+    params.set("q", query);
+    params.set("api_key", apiKey);
+    params.set("google_domain", "google.com");
+    params.set("hl", "en");
+    params.set("gl", "us");
+    params.set("device", "desktop");
+
+    const url =
+      "https://serpapi.com/search.json?" + params.toString();
+
+    const response = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      console.error("SerpApi HTTP error:", response.status);
+      return [];
+    }
+
+    const data = await response.json();
+
+    if (data.error) {
+      console.error("SerpApi returned error:", data.error);
+      return [];
+    }
+
+    const images = data.images_results || [];
+
+    if (!Array.isArray(images)) {
+      return [];
+    }
+
+    return images;
+  } catch (error) {
+    console.error("Google image search failed:", error);
+    return [];
+  }
+}
+
+/*
+==================================================
+SELECT BEST IMAGE  (FIXED VERSION)
 ==================================================
 
-PURANI CODE (jo humne dekha) sirf pehli image le leta tha
-jisme koi bhi image field (original/thumbnail) mojood ho -
-bina ye check kiye ki image actually is SAP step se match
-karti hai ya nahi. Isi wajah se galat images (jaise ABAP
-debugger, unrelated tutorials) dikh rahi thi.
+CHANGES FROM ORIGINAL CODE:
 
-NAYA CODE:
-1. Negative keywords wali images (debugger, source code,
-   workbench, etc.) turant reject karta hai.
-2. Har image ko score deta hai based on kitne keywords
-   match hote hain query se.
-3. Sirf tabhi image deta hai jab best score kam se kam
-   MIN_ACCEPTABLE_SCORE ho, warna null return karta hai
-   (matlab is step ke liye koi image nahi dikhegi - jo
-   galat image dikhane se hamesha behtar hai).
+1. NEGATIVE_KEYWORDS - agar image title/source/link mein
+   "debugger", "abap editor" jaise words milte hain, us image
+   ko turant reject kar do, chahe uska score kuch bhi ho.
+
+2. MIN_ACCEPTABLE_SCORE - agar best image ka score bhi is
+   threshold se kam hai (matlab koi achha match nahi mila),
+   to NULL return karo. Purani code hamesha ek image return
+   kar deta tha (chahe wo poori tarah unrelated ho) - yahi
+   root cause tha wrong images (jaise ABAP debugger) ka.
 */
 
 const MIN_ACCEPTABLE_SCORE = 5;
@@ -99,162 +266,174 @@ const NEGATIVE_KEYWORDS = [
   "developer",
 ];
 
-function scoreImage(image: ImageResult, query: string): number {
-  const combined = [image.title || "", image.source || "", image.link || ""]
-    .join(" ")
-    .toLowerCase();
-
-  if (NEGATIVE_KEYWORDS.some((kw) => combined.includes(kw))) {
-    return -100;
-  }
-
-  const queryWords = query
-    .toLowerCase()
-    .split(/\s+/)
-    .filter((w) => w.length > 3 && w !== "screenshot" && w !== "screen");
-
-  let score = 0;
-
-  for (const word of queryWords) {
-    if (combined.includes(word)) {
-      score += 2;
-    }
-  }
-
-  if (combined.includes("sap")) {
-    score += 3;
-  }
-
-  if (image.original || image.thumbnail || image.serpapi_thumbnail) {
-    score += 1;
-  }
-
-  return score;
-}
-
-async function searchGoogleImage(query: string): Promise<ImageResult | null> {
-  const apiKey = process.env.SERPAPI_KEY;
-
-  if (!apiKey) {
-    console.error("SERPAPI_KEY is missing from .env.local");
+function selectBestImage(
+  images: ImageResult[],
+  transaction: string,
+  title: string
+): ImageResult | null {
+  if (!images.length) {
     return null;
   }
 
-  try {
-    const params = new URLSearchParams({
-      engine: "google_images",
-      q: query,
-      api_key: apiKey,
-      google_domain: "google.com",
-      hl: "en",
-      gl: "us",
-      device: "desktop",
-    });
+  const keywords = [
+    transaction.toLowerCase(),
+    ...title
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((word) => word.length > 3),
+  ];
 
-    const url = "https://serpapi.com/search.json?" + params.toString();
+  let bestImage: ImageResult | null = null;
+  let bestScore = -1;
 
-    const response = await fetch(url, {
-      method: "GET",
-      cache: "no-store",
-    });
+  for (const image of images) {
+    const combined = [
+      image.title || "",
+      image.source || "",
+      image.link || "",
+    ]
+      .join(" ")
+      .toLowerCase();
 
-    if (!response.ok) {
-      console.error("SerpApi HTTP error:", response.status);
-      return null;
+    // FIX 1: Known-bad matches ko turant reject karo
+    if (NEGATIVE_KEYWORDS.some((kw) => combined.includes(kw))) {
+      continue;
     }
 
-    const data = await response.json();
+    let score = 0;
 
-    if (data.error) {
-      console.error("SerpApi error:", data.error);
-      return null;
-    }
-
-    const images: ImageResult[] = data.images_results || [];
-
-    if (!images.length) {
-      console.log("No Google images found for:", query);
-      return null;
-    }
-
-    // FIX: score every candidate image and reject bad matches,
-    // instead of blindly taking the first one with an image field.
-    let bestImage: ImageResult | null = null;
-    let bestScore = -1;
-
-    for (const image of images) {
-      if (!(image.original || image.thumbnail || image.serpapi_thumbnail)) {
-        continue;
-      }
-
-      const score = scoreImage(image, query);
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestImage = image;
+    for (const keyword of keywords) {
+      if (combined.includes(keyword)) {
+        score += 2;
       }
     }
 
-    if (!bestImage || bestScore < MIN_ACCEPTABLE_SCORE) {
-      console.log(
-        "IMAGE REJECTED - best score too low:",
-        bestScore,
-        "for query:",
-        query
-      );
-      return null;
+    if (combined.includes("sap")) {
+      score += 3;
     }
 
-    return bestImage;
-  } catch (error) {
-    console.error("SerpApi image search error:", error);
+    if (combined.includes(transaction.toLowerCase())) {
+      score += 5;
+    }
+
+    if (image.original || image.thumbnail || image.serpapi_thumbnail) {
+      score += 1;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestImage = image;
+    }
+  }
+
+  // FIX 2: Agar best score bhi threshold se kam hai to image mat do
+  if (bestScore < MIN_ACCEPTABLE_SCORE) {
+    console.log(
+      "IMAGE REJECTED - score too low:",
+      bestScore,
+      "for query:",
+      title
+    );
     return null;
   }
+
+  return bestImage;
 }
 
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
+/*
+==================================================
+AI INSTRUCTIONS
+==================================================
+*/
 
-    const message = body.message || body.question || body.prompt || "";
+function buildInstructions(sapModule: string, language: string): string {
+  const languageInstruction =
+    language === "hi"
+      ? `
+==================================================
+LANGUAGE
+==================================================
 
-    const sapModule = body.sapModule || "SAP";
+Respond ENTIRELY in Hindi using Devanagari script (हिंदी).
 
-    if (typeof message !== "string" || !message.trim()) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Message is required",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
+Keep T-code names, Fiori app names, and technical SAP field
+names in English (e.g. "FB50", "G/L Account", "Purchase Order")
+since these are fixed SAP terminology - but write every
+explanation, instruction, and sentence around them in Hindi.
 
-    /*
-    ==================================================
-    AI ANSWER + EXACT VISUAL STEPS
-    ==================================================
-    */
+Example style:
+"T-code: FB50
 
-    const response = await hf.responses.create({
-      model: "openai/gpt-oss-120b:groq",
+1. ट्रांजैक्शन खोलें - SAP GUI में FB50 टाइप करें और Enter दबाएं।"
 
-      instructions: `
+Do not mix Hindi and English within the same sentence beyond
+technical terms. The reader should be able to read this
+comfortably in Hindi.
+`
+      : "";
+
+  return `
 You are HireSAP AI, a professional SAP How-To Assistant.
 
-Selected SAP module:
-${sapModule}
+Selected SAP module: ${sapModule}
+${languageInstruction}
 
-User question:
-${message}
+IMPORTANT MODULE RULE:
+The selected module is only the user's starting context. It is NOT a restriction.
+Always identify what the user is actually asking before answering.
+If the question belongs to another SAP module, answer for the correct module and explicitly say:
+"This activity is primarily an SAP <MODULE> activity."
+Do NOT force an MM answer just because SAP MM is selected.
 
-Your job is to create:
+==================================================
+QUESTION UNDERSTANDING
+==================================================
 
-1. A simple and accurate SAP answer.
-2. Exact visual steps for the important procedure steps.
-3. A specific Google Images search query for every visual step.
+First determine:
+1. The exact SAP business activity requested.
+2. The correct SAP module.
+3. The correct transaction code or S/4HANA Fiori app, when applicable.
+4. Whether the question is about ECC, S/4HANA, or is version-dependent.
+
+Common routing examples:
+- Journal entry, G/L posting, general ledger, debit/credit posting -> SAP FI
+- Vendor invoice / invoice verification / MIRO -> SAP MM / FI integration
+- Purchase requisition / PR -> SAP MM
+- Purchase order / PO -> SAP MM
+- Goods receipt / GR / material document -> SAP MM
+- Sales order -> SAP SD
+- Delivery / picking / PGI -> SAP SD / LE
+- Billing document -> SAP SD
+- Production order / MRP -> SAP PP
+- Cost center posting / internal order / controlling -> SAP CO
+
+Do not confuse related processes.
+For example:
+"How can I pass a journal entry?" is an SAP FI question, not an SAP MM question.
+
+==================================================
+ACCURACY RULES
+==================================================
+
+Answer only what is relevant to the user's question.
+
+Never invent a transaction code, Fiori app, configuration path, field, table, or SAP screen.
+
+For a manual G/L journal entry:
+- In SAP GUI, FB50 is commonly used for G/L account document posting.
+- In SAP S/4HANA, the Fiori app "Post General Journal Entries" may be used.
+- If the exact system/version is unknown, clearly state that availability depends on the customer's SAP release and authorization.
+- Do not claim that one transaction is universally available in every SAP system.
+
+When a T-code is relevant, put it at the beginning:
+T-code: <code>
+
+If a Fiori app is the more appropriate S/4HANA option, state:
+Fiori app: <app name>
+
+If multiple valid methods exist, give the primary method first and briefly mention the alternative.
+
+Do not give unrelated information just to make the answer longer.
 
 ==================================================
 EXPLAIN LIKE A COMPLETE BEGINNER
@@ -275,409 +454,223 @@ Rules:
   (example: "A journal entry is like writing in a diary that money
   moved from one account to another").
 - Never assume the reader already knows what a screen, field, or
-  button looks like - describe it.
-
-==================================================
-RETURN FORMAT
-==================================================
-
-Return ONLY valid JSON.
-
-Do not return Markdown code fences.
-
-Use exactly this structure:
-
-{
-  "answer": "T-code: MM01\\n\\n1. Enter Transaction - Open SAP GUI, type MM01 in the command field and press Enter.",
-  "visualSteps": [
-    {
-      "step": 1,
-      "title": "Enter Transaction",
-      "searchQuery": "SAP MM01 Enter Transaction SAP GUI command field screen screenshot"
-    }
-  ]
-}
+  button looks like — describe it.
 
 ==================================================
 ANSWER FORMAT
 ==================================================
 
-The answer MUST use simple plain text.
-
-Do NOT use Markdown formatting.
+Use simple and clear plain text.
 
 Do NOT use:
-
-**
-*
-backticks
-Markdown bold
-Markdown italic
-Markdown code formatting
+Markdown
+Bold symbols
+Italic symbols
+Backticks
 HTML
+Special formatting symbols
 
-Do not use Markdown tables unless the user specifically asks for a table.
+Use normal numbered steps and normal hyphens.
 
-Do not write:
+For a procedure, use this structure:
 
-**T-code:** MM01
+T-code: <code>
 
-Write:
+1. Open the transaction or Fiori app and explain what to enter.
+2. Enter the required organizational/document information.
+3. Enter the relevant line items and amounts.
+4. Check or simulate the document.
+5. Post/save the document.
+6. Explain the resulting document number or accounting impact when applicable.
 
-T-code: MM01
-
-Do not write:
-
-1. **Enter Transaction** - Open SAP GUI.
-
-Write:
-
-1. Enter Transaction - Open SAP GUI.
-
-Use normal hyphens.
-
-Use simple numbered steps.
-
-==================================================
-HOW-TO QUESTIONS
-==================================================
-
-When the user asks how to perform an SAP activity:
-
-Start with:
-
-T-code: XXXX
-
-Then provide practical numbered steps.
-
-Use approximately 6 to 10 steps when appropriate.
-
-Every step must describe a real action.
-
-Keep the answer simple and professional.
-
-==================================================
-EXAMPLE
-==================================================
-
-For:
-
-How do I create a Material in SAP MM?
-
-Use a structure similar to:
-
-T-code: MM01
-
-1. Enter Transaction - Open SAP GUI, type MM01 in the command field and press Enter.
-
-2. Select Industry Sector, Material Type & Views - Choose the appropriate Industry Sector, Material Type and required Views such as Basic Data 1, Basic Data 2, Purchasing, Accounting and MRP. Click Enter.
-
-3. Enter Basic Data 1 - Fill in the required fields:
-   - Material Description
-   - Base Unit of Measure
-   - Material Group
-   - Division
-
-4. Enter Basic Data 2 - Enter additional information such as Gross Weight, Net Weight, Volume and Dimensions.
-
-5. Maintain Purchasing View - Enter the required purchasing information:
-   - Plant
-   - Purchasing Group
-   - Order Unit
-
-6. Maintain Accounting View - Enter the required accounting information:
-   - Valuation Class
-   - Price Control
-   - Standard Price
-
-7. Maintain MRP Views - Enter the required MRP information:
-   - MRP Type
-   - Lot Size
-   - MRP Controller
-   - Safety Stock
-
-8. Check the Data - Click Check and correct any errors displayed by SAP.
-
-9. Save the Material - Click Save. SAP will create the material master record and display the material number.
-
-==================================================
-VISUAL STEP RULE
-==================================================
-
-This is very important.
-
-The visual step title must closely match the exact step name used in the answer.
+Then include:
 
 Example:
+Debit: <account> <amount>
+Credit: <account> <amount>
 
-Answer:
+Important:
+- Mention prerequisites or configuration only when relevant.
+- Mention common errors only when useful.
+- Clearly distinguish FI, MM, SD, PP and CO activities.
 
-1. Enter Transaction - Open SAP GUI and type MM01.
+==================================================
+JOURNAL ENTRY EXAMPLE
+==================================================
 
-Visual step:
+If the user asks a general question such as "How can I pass a journal entry in SAP?", provide a relevant SAP FI answer such as:
+
+T-code: FB50
+Fiori app: Post General Journal Entries (SAP S/4HANA)
+
+1. Open FB50 in SAP GUI, or open the Post General Journal Entries Fiori app in S/4HANA.
+2. Enter the company code, document date, posting date and currency as required.
+3. Enter the G/L line items with the appropriate debit and credit amounts.
+4. Enter required assignments such as cost center, profit center, tax code or other fields when applicable.
+5. Check or simulate the document and correct any validation errors.
+6. Post the document. SAP creates an accounting document number.
+
+Example:
+Debit: Expense G/L Account 10,000
+Credit: Bank G/L Account 10,000
+
+Important:
+The exact fields and available posting options depend on the SAP release, configuration, document type and user authorization.
+
+==================================================
+VISUAL GUIDE
+==================================================
+
+Create visualSteps for the most important SAP screens.
+
+IMPORTANT:
+Use EXACTLY the same step title as the procedure.
+
+The visual step title must describe the actual SAP screen.
+
+Prefer 4 to 5 important visual steps.
+
+Do not create visual steps for unrelated screens.
+Do not invent a screen.
+
+==================================================
+JSON FORMAT
+==================================================
+
+Return ONLY valid JSON.
+
+Use this exact structure:
 
 {
-  "step": 1,
-  "title": "Enter Transaction",
-  "searchQuery": "SAP MM01 Enter Transaction SAP GUI command field screenshot"
+  "answer": "T-code: FB50\\nFiori app: Post General Journal Entries (SAP S/4HANA)\\n\\n1. Open the transaction or Fiori app...",
+  "visualSteps": [
+    {
+      "step": 1,
+      "title": "Open the Journal Entry Transaction or Fiori App"
+    },
+    {
+      "step": 2,
+      "title": "Enter Document Header Information"
+    },
+    {
+      "step": 3,
+      "title": "Enter G/L Line Items"
+    },
+    {
+      "step": 4,
+      "title": "Check or Simulate the Document"
+    },
+    {
+      "step": 5,
+      "title": "Post the Journal Entry"
+    }
+  ]
 }
 
-Do not create generic titles such as:
+IMPORTANT:
+Do NOT include searchQuery.
 
-MM01 Tutorial
+The application will create the Google image search query automatically from the exact step title.
 
-SAP MM Tutorial
+Do not put JSON inside Markdown code fences.
+`;
+}
 
-SAP Material Master
-
-Instead use the actual step name.
-
+/*
 ==================================================
-GOOGLE IMAGE SEARCH
+POST
 ==================================================
-
-Every important procedure step should have its own image search.
-
-The search query must be specific to the exact SAP screen.
-
-Bad search:
-
-SAP MM tutorial
-
-Bad search:
-
-SAP MM01 screenshot
-
-Good search:
-
-SAP MM01 Create Material initial screen Enter Transaction SAP GUI screenshot
-
-Good search:
-
-SAP MM01 Industry Sector Material Type Select Views SAP GUI screenshot
-
-Good search:
-
-SAP MM01 Basic Data 1 Material Description Base Unit Material Group SAP GUI screenshot
-
-Good search:
-
-SAP MM01 Basic Data 2 Gross Weight Net Weight Volume SAP GUI screenshot
-
-Good search:
-
-SAP MM01 Purchasing View Plant Purchasing Group Order Unit SAP GUI screenshot
-
-Good search:
-
-SAP MM01 Accounting View Valuation Class Price Control Standard Price SAP GUI screenshot
-
-Good search:
-
-SAP MM01 MRP View MRP Type Lot Size MRP Controller Safety Stock SAP GUI screenshot
-
-Good search:
-
-SAP MM01 Check Material Master SAP GUI screenshot
-
-Good search:
-
-SAP MM01 Save Material Master SAP GUI material number screenshot
-
-==================================================
-IMAGE ACCURACY
-==================================================
-
-The Google search query must contain the exact information needed to find the relevant SAP screen.
-
-Include when applicable:
-
-SAP
-SAP module
-Transaction code
-Exact screen
-Exact view
-Important fields
-SAP GUI
-Screenshot
-
-Do not search unrelated SAP transactions.
-
-For example:
-
-MM01 Accounting View should search for MM01 Accounting View.
-
-Do not search for MIGO.
-
-==================================================
-NUMBER OF VISUALS
-==================================================
-
-Create visual steps for all important procedure steps.
-
-If there are 6 important steps, create 6 visual steps.
-
-If there are 7 important steps, create 7 visual steps.
-
-If there are 8 important steps, create 8 visual steps.
-
-If there are 9 important steps, create 9 visual steps.
-
-Do not artificially limit the guide to 4 or 5 images.
-
-==================================================
-SIMPLE QUESTIONS
-==================================================
-
-For questions such as:
-
-What is SAP MM?
-
-Give a short definition.
-
-Use:
-
-"visualSteps": []
-
-Do not search Google Images unless a visual is genuinely useful.
-
-==================================================
-T-CODE QUESTIONS
-==================================================
-
-If the user asks:
-
-What is MM01?
-
-Answer with the meaning of the transaction code.
-
-Example:
-
-T-code: MM01
-
-MM01 is used to create a Material Master record in SAP.
-
-Do not create unnecessary images.
-
-==================================================
-CONFIGURATION QUESTIONS
-==================================================
-
-For configuration questions:
-
-Explain configuration separately from end-user processing.
-
-Use simple numbered steps.
-
-Do not invent an SPRO path.
-
-If the exact configuration path depends on SAP version or customer configuration, clearly state that.
-
-==================================================
-TROUBLESHOOTING
-==================================================
-
-For troubleshooting questions:
-
-1. Check the error.
-2. Check master data.
-3. Check configuration.
-4. Check document data.
-5. Apply the solution.
-
-Keep it practical.
-
-==================================================
-SUPPORTED SAP MODULES
-==================================================
-
-SAP MM
-SAP FICO
-SAP SD
-SAP PP
-SAP ABAP
-SAP HANA
-SAP Basis
-SAP EWM
-SAP TM
-SAP GTS
-SAP WM
-SAP SuccessFactors
-SAP Concur
-Other SAP modules when possible.
-
-==================================================
-ACCURACY
-==================================================
-
-Do not invent T-codes.
-
-Do not invent SPRO paths.
-
-Distinguish SAP ECC and SAP S/4HANA when relevant.
-
-If a process depends on customer configuration, say so.
-
-==================================================
-FINAL CHECK
-==================================================
-
-Before returning JSON, verify:
-
-1. The answer contains plain text.
-2. No Markdown formatting is used.
-3. No backticks are used.
-4. T-code is written as plain text.
-5. Numbered steps are clear.
-6. Visual titles match the step names.
-7. Google search queries match the exact SAP screens.
-8. Every important visual step has a search query.
-9. The JSON is valid.
-`,
+*/
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+
+    const message = body.message || body.question || body.prompt || "";
+
+    const sapModule = body.sapModule || "SAP MM";
+
+    const language = body.language === "hi" ? "hi" : "en";
+
+    const effectiveModule = detectEffectiveModule(message, sapModule);
+
+    console.log(
+      "SELECTED MODULE:",
+      sapModule,
+      "EFFECTIVE MODULE:",
+      effectiveModule
+    );
+
+    if (typeof message !== "string" || !message.trim()) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Message is required.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    console.log("SAP QUESTION:", message);
+
+    /*
+    ================================================
+    STEP 1
+    AI CREATES ANSWER + EXACT STEP NAMES
+    ================================================
+    */
+
+    const response = await hf.responses.create({
+      model: "openai/gpt-oss-120b:groq",
+
+      instructions: buildInstructions(effectiveModule, language),
 
       input: message,
     });
 
     const rawOutput = response.output_text || "";
 
+    console.log("RAW AI RESPONSE:", rawOutput);
+
     /*
-    ==================================================
-    PARSE AI JSON
-    ==================================================
+    ================================================
+    STEP 2
+    PARSE JSON
+    ================================================
     */
 
-    let aiResult: {
+    let result: {
       answer: string;
       visualSteps: VisualStep[];
     };
 
     try {
-      const cleaned = cleanJson(rawOutput);
+      const jsonText = cleanJson(rawOutput);
 
-      aiResult = JSON.parse(cleaned);
+      result = JSON.parse(jsonText);
 
-      if (!aiResult.answer || typeof aiResult.answer !== "string") {
-        throw new Error("AI did not return a valid answer.");
+      if (typeof result.answer !== "string") {
+        throw new Error("AI answer is missing.");
       }
 
-      if (!Array.isArray(aiResult.visualSteps)) {
-        aiResult.visualSteps = [];
+      if (!Array.isArray(result.visualSteps)) {
+        result.visualSteps = [];
       }
     } catch (error) {
-      console.error("AI JSON PARSE ERROR:", error);
-
-      console.error("RAW AI RESPONSE:", rawOutput);
+      console.error("JSON PARSE ERROR:", error);
 
       return NextResponse.json({
         success: true,
 
-        answer: rawOutput || "Unable to generate an answer.",
+        answer: cleanAnswer(rawOutput),
 
         transaction: extractTransaction(rawOutput),
 
-        visuals: [],
-
         visualSteps: [],
+
+        visuals: [],
 
         visual: null,
 
@@ -688,53 +681,96 @@ Before returning JSON, verify:
     }
 
     /*
-    ==================================================
-    TRANSACTION
-    ==================================================
+    ================================================
+    STEP 3
+    CLEAN ANSWER
+    ================================================
     */
 
-    const transaction = extractTransaction(aiResult.answer);
+    const answer = cleanAnswer(result.answer);
 
     /*
-    ==================================================
-    CLEAN VISUAL STEPS
-    ==================================================
+    ================================================
+    STEP 4
+    FIND TRANSACTION
+    ================================================
     */
 
-    const visualSteps = aiResult.visualSteps
+    const transaction = extractTransaction(answer);
+
+    /*
+    ================================================
+    STEP 5
+    PREPARE EXACT VISUAL STEPS
+    ================================================
+    */
+
+    let visualSteps = result.visualSteps
       .filter(
         (item) =>
-          item && typeof item.step === "number" && typeof item.title === "string"
+          item &&
+          typeof item.step === "number" &&
+          typeof item.title === "string"
       )
       .map((item) => ({
         step: item.step,
-
-        title: item.title.trim(),
-
-        searchQuery: (
-          item.searchQuery || fallbackSearchQuery(sapModule, transaction, item.title)
-        ).trim(),
-      }));
-
-    console.log("AI VISUAL STEPS:", visualSteps);
+        title: item.title.trim().replace(/^[0-9]+[.)-]\s*/, ""),
+      }))
+      .filter((item) => item.title.length > 0);
 
     /*
-    ==================================================
-    SEARCH GOOGLE IMAGES
-    ==================================================
+    ================================================
+    LIMIT TO MAXIMUM 5 VISUALS
+    ================================================
+    */
+
+    visualSteps = visualSteps.slice(0, 5);
+
+    console.log("EXACT VISUAL STEPS:", visualSteps);
+
+    /*
+    ================================================
+    STEP 6
+    GOOGLE IMAGE SEARCH
+
+    We create the query ourselves from the
+    exact visual step title (not AI generated).
+    ================================================
     */
 
     const visualResults = await Promise.all(
       visualSteps.map(async (step) => {
-        const image = await searchGoogleImage(step.searchQuery);
-
-        if (!image) {
+        // Only search for a SAP screenshot when a real transaction
+        // has been identified. This prevents unrelated images.
+        if (!transaction) {
           return null;
         }
 
-        const imageUrl = image.original || image.thumbnail || image.serpapi_thumbnail || "";
+        const searchQuery = createImageSearchQuery(
+          effectiveModule,
+          transaction,
+          step.title
+        );
 
-        const fallbackImage = image.thumbnail || image.serpapi_thumbnail || image.original || "";
+        console.log("GOOGLE IMAGE SEARCH:", searchQuery);
+
+        const images = await searchGoogleImages(searchQuery);
+
+        const image = selectBestImage(images, transaction, step.title);
+
+        if (!image) {
+          console.log("NO IMAGE FOUND:", searchQuery);
+          return null;
+        }
+
+        const imageUrl =
+          image.original ||
+          image.thumbnail ||
+          image.serpapi_thumbnail ||
+          "";
+
+        const fallbackImage =
+          image.thumbnail || image.serpapi_thumbnail || image.original || "";
 
         if (!imageUrl) {
           return null;
@@ -742,25 +778,21 @@ Before returning JSON, verify:
 
         return {
           step: step.step,
-
           title: step.title,
-
-          query: step.searchQuery,
-
           image: imageUrl,
-
           fallbackImage,
-
           thumbnail: fallbackImage,
-
-          source: image.source || "Google Images",
-
-          sourceUrl: image.link || "",
-
           transaction,
         };
       })
     );
+
+    /*
+    ================================================
+    STEP 7
+    REMOVE FAILED IMAGES
+    ================================================
+    */
 
     const visuals = visualResults.filter(
       (item): item is NonNullable<typeof item> => item !== null
@@ -768,18 +800,17 @@ Before returning JSON, verify:
 
     console.log("FINAL VISUAL COUNT:", visuals.length);
 
-    console.log("FINAL VISUALS:", visuals);
-
     /*
-    ==================================================
-    RETURN TO FRONTEND
-    ==================================================
+    ================================================
+    STEP 8
+    RETURN RESULT
+    ================================================
     */
 
     return NextResponse.json({
       success: true,
 
-      answer: aiResult.answer,
+      answer,
 
       transaction,
 
@@ -800,7 +831,10 @@ Before returning JSON, verify:
       {
         success: false,
 
-        error: error instanceof Error ? error.message : "AI service could not process the request.",
+        error:
+          error instanceof Error
+            ? error.message
+            : "AI service could not process the request.",
       },
       {
         status: 500,

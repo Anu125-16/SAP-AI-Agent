@@ -108,6 +108,13 @@ const SUGGESTED_QUESTIONS: Record<string, string[]> = {
 export default function AgentPage() {
   const [sapModule, setSapModule] = useState("SAP MM");
 
+  /*
+    ==================================================
+    LANGUAGE TOGGLE (English / Hindi)
+    ==================================================
+  */
+  const [language, setLanguage] = useState<"en" | "hi">("en");
+
   const [question, setQuestion] = useState("");
 
   const [loading, setLoading] = useState(false);
@@ -237,6 +244,8 @@ export default function AgentPage() {
           message: finalQuestion,
 
           sapModule,
+
+          language,
         }),
       });
 
@@ -281,6 +290,36 @@ export default function AgentPage() {
           "hiresap_questions_asked",
           String(newCount)
         );
+      }
+
+      /*
+        HISTORY SAVE
+        Har question+answer ko localStorage mein save karo taaki
+        'My History' page pe dikhaya ja sake. Sirf browser mein
+        save hota hai (koi database nahi), isliye dusre device
+        pe wahi history nahi dikhegi - sirf isi browser mein.
+      */
+      try {
+        const existingHistory = JSON.parse(
+          window.localStorage.getItem("hiresap_history") || "[]"
+        );
+
+        const newEntry = {
+          question: finalQuestion,
+          answer: data.answer || "",
+          module: sapModule,
+          language,
+          timestamp: new Date().toISOString(),
+        };
+
+        const updatedHistory = [newEntry, ...existingHistory].slice(0, 100);
+
+        window.localStorage.setItem(
+          "hiresap_history",
+          JSON.stringify(updatedHistory)
+        );
+      } catch (historyError) {
+        console.error("HISTORY SAVE ERROR:", historyError);
       }
     } catch (error) {
       console.error("ASK SAP ERROR:", error);
@@ -387,16 +426,38 @@ export default function AgentPage() {
                 </p>
               </div>
 
-              <div className="rounded-lg bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-400">
-                Visual SAP Guide
-              </div>
+              <div className="flex items-center gap-3">
+                <div className="rounded-lg bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-400">
+                  Visual SAP Guide
+                </div>
 
-              <Link
-                href="/About"
-                className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-cyan-400 hover:text-cyan-400"
-              >
-                About
-              </Link>
+                {/*
+                  LANGUAGE TOGGLE
+                  Click karke English/Hindi switch karo.
+                */}
+                <button
+                  onClick={() =>
+                    setLanguage((prev) => (prev === "en" ? "hi" : "en"))
+                  }
+                  className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-cyan-400 hover:text-cyan-400"
+                >
+                  {language === "en" ? "हिंदी" : "English"}
+                </button>
+
+                <Link
+                  href="/history"
+                  className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-cyan-400 hover:text-cyan-400"
+                >
+                  History
+                </Link>
+
+                <Link
+                  href="/About"
+                  className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-cyan-400 hover:text-cyan-400"
+                >
+                  About
+                </Link>
+              </div>
             </div>
           </header>
 
