@@ -3,18 +3,6 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-/*
-==================================================
-HOW TO USE THIS FILE
-==================================================
-
-1. Naya folder banao: app/history
-2. Is file ko us folder ke andar 'page.tsx' naam se save karo.
-   Final path: app/history/page.tsx
-3. Save, commit, push, deploy karo (jaisa pehle karte the).
-4. Ye page yahan open hoga: yoursite.com/history
-*/
-
 type HistoryEntry = {
   question: string;
   answer: string;
@@ -45,17 +33,17 @@ export default function HistoryPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#050816] text-white">
-      <header className="border-b border-cyan-900/40 px-6 py-5">
-        <div className="mx-auto flex max-w-4xl items-center justify-between">
-          <Link href="/Agent" className="text-xl font-bold text-cyan-400">
+    <main className="min-h-screen bg-slate-50 text-slate-900">
+      <header className="border-b border-slate-200 bg-white px-6 py-5">
+        <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-3">
+          <Link href="/Agent" className="text-xl font-bold text-cyan-600">
             ERP Tutor AI
           </Link>
 
           <div className="flex gap-3">
             <Link
               href="/Agent"
-              className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-300 hover:border-cyan-400 hover:text-cyan-400"
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:border-cyan-500 hover:text-cyan-600"
             >
               Back to Assistant
             </Link>
@@ -63,7 +51,7 @@ export default function HistoryPage() {
             {history.length > 0 && (
               <button
                 onClick={clearHistory}
-                className="rounded-lg border border-red-800 px-4 py-2 text-sm font-semibold text-red-400 hover:border-red-500"
+                className="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-600 hover:border-red-500"
               >
                 Clear History
               </button>
@@ -73,22 +61,24 @@ export default function HistoryPage() {
       </header>
 
       <section className="mx-auto max-w-4xl px-6 py-10">
-        <h1 className="text-2xl font-bold text-white">My Question History</h1>
-        <p className="mt-2 text-sm text-slate-400">
+        <h1 className="text-2xl font-bold text-slate-900">
+          My Question History
+        </h1>
+        <p className="mt-2 text-sm text-slate-500">
           This history is saved only in this browser. It will not appear on
           another device.
         </p>
 
         {!loaded ? (
-          <p className="mt-8 text-slate-500">Loading...</p>
+          <p className="mt-8 text-slate-400">Loading...</p>
         ) : history.length === 0 ? (
-          <div className="mt-8 rounded-2xl border border-slate-700 bg-[#0b1326] p-8 text-center">
-            <p className="text-slate-400">
+          <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+            <p className="text-slate-500">
               You haven't asked any questions yet.
             </p>
             <Link
               href="/Agent"
-              className="mt-4 inline-block rounded-lg bg-cyan-500 px-6 py-3 font-bold text-black hover:bg-cyan-400"
+              className="mt-4 inline-block rounded-lg bg-cyan-600 px-6 py-3 font-bold text-white hover:bg-cyan-500"
             >
               Ask your first question
             </Link>
@@ -98,21 +88,21 @@ export default function HistoryPage() {
             {history.map((entry, index) => (
               <div
                 key={index}
-                className="rounded-2xl border border-slate-700 bg-[#0b1326] p-5"
+                className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
               >
-                <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                  <span className="rounded-full bg-cyan-500/10 px-3 py-1 font-semibold text-cyan-400">
+                <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                  <span className="rounded-full bg-cyan-50 px-3 py-1 font-semibold text-cyan-700">
                     {entry.module}
                   </span>
                   <span>{entry.language === "hi" ? "हिंदी" : "English"}</span>
-                  <span>
-                    {new Date(entry.timestamp).toLocaleString()}
-                  </span>
+                  <span>{new Date(entry.timestamp).toLocaleString()}</span>
                 </div>
 
-                <p className="font-semibold text-white">{entry.question}</p>
+                <p className="font-semibold text-slate-900">
+                  {entry.question}
+                </p>
 
-                <p className="mt-2 whitespace-pre-line text-sm text-slate-300">
+                <p className="mt-2 whitespace-pre-line text-sm text-slate-600">
                   {entry.answer}
                 </p>
               </div>
