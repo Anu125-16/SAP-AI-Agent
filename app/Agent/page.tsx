@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import Link from "next/link";
 
 type Visual = {
   step: number;
@@ -111,6 +112,76 @@ export default function AgentPage() {
 
   const [loading, setLoading] = useState(false);
 
+  /*
+    ==================================================
+    FREE QUESTION LIMIT
+    ==================================================
+    5 free questions ke baad naam+email maanga jayega.
+    localStorage mein save hota hai, isliye browser band
+    karke wapas aane par bhi count yaad rehta hai.
+  */
+
+  const FREE_QUESTION_LIMIT = 5;
+
+  const [questionsAsked, setQuestionsAsked] = useState(0);
+  const [hasUnlocked, setHasUnlocked] = useState(false);
+  const [checkedStorage, setCheckedStorage] = useState(false);
+
+  const [leadName, setLeadName] = useState("");
+  const [leadEmail, setLeadEmail] = useState("");
+  const [leadSubmitting, setLeadSubmitting] = useState(false);
+  const [leadError, setLeadError] = useState("");
+
+  useEffect(() => {
+    const savedCount = Number(
+      window.localStorage.getItem("hiresap_questions_asked") || "0"
+    );
+    const unlocked =
+      window.localStorage.getItem("hiresap_unlocked") === "true";
+
+    setQuestionsAsked(savedCount);
+    setHasUnlocked(unlocked);
+    setCheckedStorage(true);
+  }, []);
+
+  const limitReached =
+    checkedStorage && !hasUnlocked && questionsAsked >= FREE_QUESTION_LIMIT;
+
+  async function submitLead(event: React.FormEvent) {
+    event.preventDefault();
+    setLeadError("");
+
+    if (!leadName.trim() || !leadEmail.trim()) {
+      setLeadError("Please enter both your name and email.");
+      return;
+    }
+
+    setLeadSubmitting(true);
+
+    try {
+      const response = await fetch("/api/lead", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: leadName, email: leadEmail }),
+      });
+
+      const data = await response.json();
+
+      if (!data.success) {
+        throw new Error(data.error || "Something went wrong.");
+      }
+
+      window.localStorage.setItem("hiresap_unlocked", "true");
+      setHasUnlocked(true);
+    } catch (error) {
+      setLeadError(
+        error instanceof Error ? error.message : "Something went wrong."
+      );
+    } finally {
+      setLeadSubmitting(false);
+    }
+  }
+
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
@@ -131,6 +202,11 @@ export default function AgentPage() {
     }
 
     if (loading) {
+      return;
+    }
+
+    // Free limit check - agar limit khatam ho gayi to yahin rok do
+    if (limitReached) {
       return;
     }
 
@@ -196,6 +272,16 @@ export default function AgentPage() {
           visuals: Array.isArray(data.visuals) ? data.visuals : [],
         },
       ]);
+
+      // Question count badhao aur save karo (sirf agar unlock nahi hua)
+      if (!hasUnlocked) {
+        const newCount = questionsAsked + 1;
+        setQuestionsAsked(newCount);
+        window.localStorage.setItem(
+          "hiresap_questions_asked",
+          String(newCount)
+        );
+      }
     } catch (error) {
       console.error("ASK SAP ERROR:", error);
 
@@ -272,7 +358,7 @@ export default function AgentPage() {
               <button
                 key={item}
                 onClick={() => askSAP(item)}
-                disabled={loading}
+                disabled={loading || limitReached}
                 className="w-full rounded-lg border border-slate-700 bg-[#0b1428] p-3 text-left text-sm text-slate-300 transition hover:border-cyan-500 hover:text-white disabled:opacity-50"
               >
                 {item}
@@ -304,6 +390,13 @@ export default function AgentPage() {
               <div className="rounded-lg bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-400">
                 Visual SAP Guide
               </div>
+
+              <Link
+                href="/About"
+                className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-cyan-400 hover:text-cyan-400"
+              >
+                About
+              </Link>
             </div>
           </header>
 
@@ -498,32 +591,85 @@ export default function AgentPage() {
           </div>
 
           {/* =========================================
-              FIXED QUESTION AREA
+              FIXED QUESTION AREA / SIGNUP GATE
 
               This stays at the bottom.
           ========================================= */}
 
           <div className="shrink-0 border-t border-cyan-900/40 bg-[#070d1c] p-4 md:p-6">
-            <form
-              onSubmit={handleSubmit}
-              className="mx-auto flex max-w-[1100px] gap-3"
-            >
-              <input
-                value={question}
-                onChange={(event) => setQuestion(event.target.value)}
-                disabled={loading}
-                placeholder="Ask your SAP question..."
-                className="min-w-0 flex-1 rounded-xl border border-slate-700 bg-[#020617] px-5 py-4 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-400 disabled:opacity-50"
-              />
-
-              <button
-                type="submit"
-                disabled={loading || !question.trim()}
-                className="rounded-xl bg-cyan-500 px-7 py-4 font-bold text-black transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
+            {limitReached ? (
+              /*
+                LEAD CAPTURE FORM
+                Jab 5 free questions khatam ho jaayein.
+              */
+              <form
+                onSubmit={submitLead}
+                className="mx-auto flex max-w-[600px] flex-col gap-3"
               >
-                {loading ? "..." : "Send"}
-              </button>
-            </form>
+                <p className="text-center text-sm text-slate-300">
+                  You've used your {FREE_QUESTION_LIMIT} free questions.
+                  Enter your name and email to keep asking for free.
+                </p>
+
+                <input
+                  value={leadName}
+                  onChange={(e) => setLeadName(e.target.value)}
+                  placeholder="Your name"
+                  className="rounded-xl border border-slate-700 bg-[#020617] px-5 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-400"
+                />
+
+                <input
+                  value={leadEmail}
+                  onChange={(e) => setLeadEmail(e.target.value)}
+                  type="email"
+                  placeholder="Your email"
+                  className="rounded-xl border border-slate-700 bg-[#020617] px-5 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-400"
+                />
+
+                {leadError && (
+                  <p className="text-center text-xs text-red-400">
+                    {leadError}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={leadSubmitting}
+                  className="rounded-xl bg-cyan-500 px-7 py-3 font-bold text-black transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {leadSubmitting ? "..." : "Continue for Free"}
+                </button>
+              </form>
+            ) : (
+              <form
+                onSubmit={handleSubmit}
+                className="mx-auto flex max-w-[1100px] gap-3"
+              >
+                <input
+                  value={question}
+                  onChange={(event) => setQuestion(event.target.value)}
+                  disabled={loading}
+                  placeholder="Ask your SAP question..."
+                  className="min-w-0 flex-1 rounded-xl border border-slate-700 bg-[#020617] px-5 py-4 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-400 disabled:opacity-50"
+                />
+
+                <button
+                  type="submit"
+                  disabled={loading || !question.trim()}
+                  className="rounded-xl bg-cyan-500 px-7 py-4 font-bold text-black transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {loading ? "..." : "Send"}
+                </button>
+              </form>
+            )}
+
+            {!limitReached && checkedStorage && !hasUnlocked && (
+              <p className="mx-auto mt-2 max-w-[1100px] text-center text-xs text-slate-500">
+                {FREE_QUESTION_LIMIT - questionsAsked} free question
+                {FREE_QUESTION_LIMIT - questionsAsked === 1 ? "" : "s"}{" "}
+                remaining
+              </p>
+            )}
           </div>
         </section>
       </div>
