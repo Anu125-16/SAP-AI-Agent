@@ -452,7 +452,7 @@ export default function AgentPage() {
                 </Link>
 
                 <Link
-                  href="/About"
+                  href="/about"
                   className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-cyan-400 hover:text-cyan-400"
                 >
                   About
