@@ -40,6 +40,9 @@ export const metadata: Metadata = {
     siteName: "ERP Tutor AI",
     type: "website",
   },
+  verification: {
+    google: "BrqODH9ecRzQdfdz3ykOhL8Rj9bgDjWp4TawHX58j2I",
+  },
 };
 
 export default function RootLayout({
