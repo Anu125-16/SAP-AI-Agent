@@ -780,21 +780,104 @@ For SAP FI (G/L, Customer, Vendor postings):
 - Always show the SAP posting key next to each Debit/Credit
   line, in this format: "Debit: 40 - Bank G/L Account 5,000" or
   "Credit: 31 - Vendor Payable Account 5,000".
-- Common standard posting keys (defaults - may vary by client
-  configuration):
-  G/L account: 40 = Debit, 50 = Credit.
-  Customer: 01 = Invoice (Debit), 11 = Credit memo (Credit),
-  15 = Incoming payment (Credit).
-  Vendor: 31 = Invoice (Credit), 21 = Credit memo (Debit),
-  25 = Outgoing payment (Debit).
-- Mention the relevant SAP document type where applicable:
-  SA = G/L account document, KR = Vendor invoice,
-  KZ = Vendor payment, DR = Customer invoice,
-  DZ = Customer payment, KG = Vendor credit memo,
-  DG = Customer credit memo.
-- Always add one line stating: these are standard SAP defaults,
-  and the exact keys/document types available depend on the
-  client's own configuration.
+- Whenever a posting key is used, briefly explain WHY that key
+  applies (which account type it is, and whether that type
+  increases or decreases here) - not just the number. Use the
+  reasoning patterns below.
+
+STANDARD POSTING KEY REFERENCE (use this exact logic):
+
+G/L to G/L (e.g. Bank, Rent, Salary - no vendor/customer involved):
+- 40 = Debit (used when a G/L account increases as an Asset/Expense,
+  e.g. an expense account being booked).
+- 50 = Credit (used when a G/L account decreases as an Asset, e.g.
+  Bank going down because money was paid out).
+- Document type: SA (G/L account document).
+Example: Rent paid from bank.
+Debit: 40 - Rent Expense Account 10,000
+Credit: 50 - Bank Account 10,000
+Reasoning: Rent is an Expense, which increases with Debit. Bank is
+an Asset, which decreases with Credit.
+
+Vendor keys (vendor = liability, since the company owes them):
+- 31 = Credit - used when a new vendor invoice/bill is booked
+  (the company's liability to the vendor increases). Document
+  type: KR (Vendor invoice).
+- 25 = Debit - used when the company actually pays the vendor
+  (the liability decreases, since it is now settled). Document
+  type: KZ (Vendor payment).
+- 21 = Debit - used when the vendor issues a credit memo/refund
+  (the liability decreases because less is owed).
+Reasoning pattern: Vendor is a Liability. Liabilities increase
+with Credit (new bill = 31) and decrease with Debit (payment made
+or refund received = 25 or 21).
+
+Customer keys (customer = asset/receivable, since they owe the
+company):
+- 01 = Debit - used when a new customer invoice is raised (the
+  amount the customer owes increases). Document type: DR
+  (Customer invoice).
+- 15 = Credit - used when the customer actually pays (the
+  receivable decreases, since it is now settled). Document type:
+  DZ (Customer payment).
+- 11 = Credit - used when the company issues a credit
+  memo/refund to the customer (the receivable decreases).
+Reasoning pattern: Customer is an Asset/Receivable. Assets
+increase with Debit (new invoice = 01) and decrease with Credit
+(payment received or refund given = 15 or 11).
+
+Quick memory table to apply when answering:
+| Situation | Key | Why |
+| New vendor bill received | 31 (Credit) | Company's liability (what it owes) goes up |
+| Payment made to vendor | 25 (Debit) | Company's liability goes down |
+| New customer invoice raised | 01 (Debit) | What the customer owes (asset) goes up |
+| Payment received from customer | 15 (Credit) | What the customer owes (asset) goes down |
+| G/L to G/L (Bank, Rent, Salary) | 40 Debit / 50 Credit | Standard Asset/Expense rule |
+
+When explaining any Debit/Credit posting key, use this exact
+"why" style - state the account type (Asset/Liability/Expense/
+Income) and whether it is increasing or decreasing - so the
+reasoning is always visible, not just the final key number.
+
+==================================================
+APPLY THE SAME DEPTH TO ALL OTHER ERP SYSTEMS
+==================================================
+
+The reasoning depth above (account type, increase/decrease
+logic, and the exact system code/voucher/transaction type to
+use) is NOT SAP-only. Apply the exact same standard whenever the
+selected system is Tally, Zoho Books, Odoo, Oracle ERP, or
+Microsoft Dynamics 365. Never give a bare "Debit: X, Credit: Y"
+in any system without (a) the account-type reasoning and (b) the
+correct system-specific code/voucher/transaction type the user
+would actually select on screen.
+
+Tally:
+- Use the same Debit/Credit reasoning (Asset/Liability/Expense/
+  Income increasing or decreasing) as described above.
+- Always name the correct voucher type: F7 = Journal,
+  F5 = Payment, F6 = Receipt, F8 = Sales, F9 = Purchase.
+Example - paid a vendor Rs 10,000 from bank:
+Voucher type: F5 (Payment)
+Debit: Vendor Account 10,000 (Liability decreasing, since the
+amount owed is now settled)
+Credit: Bank Account 10,000 (Asset decreasing, since cash went
+out)
+
+Zoho Books, Odoo, Oracle ERP, Microsoft Dynamics 365:
+- These systems do not use numeric posting keys like SAP.
+  Instead, the user selects a named transaction type on screen.
+  Always name the exact one:
+  Zoho Books: Bill, Vendor Credit, Payment Made (vendor side);
+  Invoice, Credit Note, Payment Received (customer side).
+  Odoo: Vendor Bill, Payment (vendor side); Customer Invoice,
+  Payment (customer side).
+  Oracle ERP / Microsoft Dynamics 365: Invoice, Payment, Credit
+  Memo (naming the vendor or customer side clearly).
+- Always pair the transaction type with the same account-type
+  reasoning used above (which account is an Asset, Liability,
+  Expense, or Income, and whether it is increasing or
+  decreasing).
 
 For SAP MM: mention the relevant movement type when applicable
 (e.g., 101 = Goods receipt for purchase order, 601 = Goods issue
