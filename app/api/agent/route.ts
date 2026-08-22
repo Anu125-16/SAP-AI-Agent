@@ -20,6 +20,20 @@ type ImageResult = {
   link?: string;
 };
 
+/*
+==================================================
+NON-SAP SYSTEMS LIST (shared everywhere)
+==================================================
+*/
+
+const NON_SAP_SYSTEMS = [
+  "Tally",
+  "Zoho Books",
+  "Odoo",
+  "Oracle ERP",
+  "Microsoft Dynamics 365",
+];
+
 function extractTransaction(answer: string): string {
   const transactionList = [
     "MM01",
@@ -102,7 +116,7 @@ function cleanAnswer(text: string): string {
 
 /*
 ==================================================
-CREATE EXACT GOOGLE IMAGE SEARCH QUERY
+DETECT EFFECTIVE MODULE / SYSTEM
 ==================================================
 */
 
@@ -115,15 +129,7 @@ function detectEffectiveModule(
   // SAP routing bilkul skip karo - warna "journal entry" jaisa
   // keyword hamesha "FI" (SAP) return kar deta tha, chahe user ne
   // Tally select kiya ho.
-  const nonSapSystems = [
-    "Tally",
-    "Zoho Books",
-    "Odoo",
-    "Oracle ERP",
-    "Microsoft Dynamics 365",
-  ];
-
-  if (nonSapSystems.includes(selectedModule)) {
+  if (NON_SAP_SYSTEMS.includes(selectedModule)) {
     return selectedModule;
   }
 
@@ -168,15 +174,33 @@ function detectEffectiveModule(
   return selectedModule.replace(/^SAP\s+/i, "").trim();
 }
 
+/*
+==================================================
+CREATE EXACT GOOGLE IMAGE SEARCH QUERY
+(now ERP-aware, not hardcoded to SAP)
+==================================================
+*/
+
 function createImageSearchQuery(
   effectiveModule: string,
   transaction: string,
-  title: string
+  title: string,
+  isNonSap: boolean
 ): string {
   const cleanTitle = title
     .replace(/[^\w\s&-]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+
+  if (isNonSap) {
+    // effectiveModule here IS the system name itself, e.g. "Tally",
+    // "Zoho Books", "Odoo", "Oracle ERP", "Microsoft Dynamics 365".
+    const parts = [effectiveModule, cleanTitle, "screenshot"].filter(
+      Boolean
+    );
+
+    return parts.join(" ");
+  }
 
   const parts = [
     "SAP",
@@ -253,25 +277,30 @@ async function searchGoogleImages(
 
 /*
 ==================================================
-SELECT BEST IMAGE  (FIXED VERSION)
+SELECT BEST IMAGE  (ERP-AWARE VERSION)
 ==================================================
 
-CHANGES FROM ORIGINAL CODE:
+CHANGES:
 
-1. NEGATIVE_KEYWORDS - agar image title/source/link mein
+1. NEGATIVE_KEYWORDS_COMMON - agar image title/source/link mein
    "debugger", "abap editor" jaise words milte hain, us image
    ko turant reject kar do, chahe uska score kuch bhi ho.
 
-2. MIN_ACCEPTABLE_SCORE - agar best image ka score bhi is
+2. CROSS-SYSTEM REJECTION - agar user ne SAP select kiya hai,
+   to Tally/Zoho/Odoo/Oracle/Dynamics wali images reject hongi,
+   aur agar user ne (jaise) Tally select kiya hai, to SAP/Fiori
+   wali images reject hongi. Isse galat-system-ki-image ka
+   chance khatam ho jata hai.
+
+3. MIN_ACCEPTABLE_SCORE - agar best image ka score bhi is
    threshold se kam hai (matlab koi achha match nahi mila),
-   to NULL return karo. Purani code hamesha ek image return
-   kar deta tha (chahe wo poori tarah unrelated ho) - yahi
-   root cause tha wrong images (jaise ABAP debugger) ka.
+   to NULL return karo, taaki koi unrelated image kabhi na dikhe.
 */
 
-const MIN_ACCEPTABLE_SCORE = 5;
+const MIN_ACCEPTABLE_SCORE_SAP = 5;
+const MIN_ACCEPTABLE_SCORE_NON_SAP = 3;
 
-const NEGATIVE_KEYWORDS = [
+const NEGATIVE_KEYWORDS_COMMON = [
   "debugger",
   "abap editor",
   "abap program",
@@ -283,10 +312,21 @@ const NEGATIVE_KEYWORDS = [
   "developer",
 ];
 
+const OTHER_SYSTEM_KEYWORDS: Record<string, string[]> = {
+  SAP: ["sap", "fiori", "s/4hana", "sap gui"],
+  Tally: ["tally", "tallyprime", "gateway of tally"],
+  "Zoho Books": ["zoho books", "zoho"],
+  Odoo: ["odoo"],
+  "Oracle ERP": ["oracle erp", "oracle fusion", "oracle cloud"],
+  "Microsoft Dynamics 365": ["dynamics 365", "microsoft dynamics"],
+};
+
 function selectBestImage(
   images: ImageResult[],
   transaction: string,
-  title: string
+  title: string,
+  systemName: string,
+  isNonSap: boolean
 ): ImageResult | null {
   if (!images.length) {
     return null;
@@ -299,6 +339,20 @@ function selectBestImage(
       .split(/\s+/)
       .filter((word) => word.length > 3),
   ];
+
+  // Build the list of "other system" keywords that should NOT
+  // appear in the image (to avoid cross-system mismatches).
+  const currentSystemKey = isNonSap ? systemName : "SAP";
+
+  const rejectKeywords: string[] = [];
+
+  for (const key of Object.keys(OTHER_SYSTEM_KEYWORDS)) {
+    if (key !== currentSystemKey) {
+      rejectKeywords.push(...OTHER_SYSTEM_KEYWORDS[key]);
+    }
+  }
+
+  const ownSystemKeywords = OTHER_SYSTEM_KEYWORDS[currentSystemKey] || [];
 
   let bestImage: ImageResult | null = null;
   let bestScore = -1;
@@ -313,23 +367,28 @@ function selectBestImage(
       .toLowerCase();
 
     // FIX 1: Known-bad matches ko turant reject karo
-    if (NEGATIVE_KEYWORDS.some((kw) => combined.includes(kw))) {
+    if (NEGATIVE_KEYWORDS_COMMON.some((kw) => combined.includes(kw))) {
+      continue;
+    }
+
+    // FIX 2: Doosre ERP system ki image reject karo
+    if (rejectKeywords.some((kw) => combined.includes(kw))) {
       continue;
     }
 
     let score = 0;
 
     for (const keyword of keywords) {
-      if (combined.includes(keyword)) {
+      if (keyword && combined.includes(keyword)) {
         score += 2;
       }
     }
 
-    if (combined.includes("sap")) {
+    if (ownSystemKeywords.some((kw) => combined.includes(kw))) {
       score += 3;
     }
 
-    if (combined.includes(transaction.toLowerCase())) {
+    if (transaction && combined.includes(transaction.toLowerCase())) {
       score += 5;
     }
 
@@ -343,8 +402,12 @@ function selectBestImage(
     }
   }
 
-  // FIX 2: Agar best score bhi threshold se kam hai to image mat do
-  if (bestScore < MIN_ACCEPTABLE_SCORE) {
+  const threshold = isNonSap
+    ? MIN_ACCEPTABLE_SCORE_NON_SAP
+    : MIN_ACCEPTABLE_SCORE_SAP;
+
+  // FIX 3: Agar best score bhi threshold se kam hai to image mat do
+  if (bestScore < threshold) {
     console.log(
       "IMAGE REJECTED - score too low:",
       bestScore,
@@ -389,15 +452,7 @@ comfortably in Hindi.
 `
       : "";
 
-  const nonSapSystems = [
-    "Tally",
-    "Zoho Books",
-    "Odoo",
-    "Oracle ERP",
-    "Microsoft Dynamics 365",
-  ];
-
-  const isNonSap = nonSapSystems.includes(sapModule);
+  const isNonSap = NON_SAP_SYSTEMS.includes(sapModule);
 
   const systemInstruction = isNonSap
     ? `
@@ -450,6 +505,64 @@ Always identify what the user is actually asking before answering.
 If the question belongs to another SAP module, answer for the correct module and explicitly say:
 "This activity is primarily an SAP <MODULE> activity."
 Do NOT force an MM answer just because SAP MM is selected.
+
+==================================================
+UNIVERSAL ACCOUNTING RULES (ALL ERPs)
+==================================================
+
+Double-entry accounting works the same way in every ERP system,
+because it follows universal accounting principles, not
+software-specific rules. Apply these rules regardless of which
+ERP the user selected (SAP, Tally, Zoho Books, Odoo, Oracle ERP,
+or Microsoft Dynamics 365).
+
+Five account types and their normal behavior:
+- Assets (cash, bank, inventory, debtors/receivables) - increase with Debit, decrease with Credit.
+- Liabilities (loans, creditors/payables) - increase with Credit, decrease with Debit.
+- Equity/Capital - increases with Credit, decreases with Debit.
+- Income/Revenue - increases with Credit.
+- Expenses - increase with Debit.
+
+Golden rule check for every transaction:
+1. Identify which accounts are affected by the transaction.
+2. Identify the type of each account (Asset, Liability, Equity, Income, Expense).
+3. Decide Debit or Credit for each account using the rules above.
+4. Confirm that total Debit amount equals total Credit amount. If they do not match, the entry is incorrect - state this clearly and give the exact mismatch amount.
+
+EXPLAIN WITH A SMALL EXAMPLE FIRST:
+Before giving the full rule-based explanation, start with one short,
+concrete example using real numbers relevant to the user's question
+(for example: "Say a customer paid Rs 5,000 into the bank - here,
+Bank account is debited and Customer account is credited, because
+Bank is an Asset increasing and the Customer's due amount is going
+down."). Keep this opening example to 2-3 sentences. After the
+example, then expand into the fuller explanation, the golden rule
+check, and (if relevant) the ERP-specific posting steps. Do not skip
+straight to abstract rules without this example first.
+
+When the user describes a real transaction or scenario (for example,
+recording a bank statement line, matching a payment, fixing a
+reconciliation difference, or asking "is this entry correct"):
+
+- Do NOT jump straight into ERP navigation steps.
+- First explain the accounting logic in plain words: which account
+  is debited, which is credited, and why - using the rules above.
+- If the user has already made an entry, clearly state whether it
+  is correct or incorrect. If incorrect, explain exactly what is
+  wrong (wrong side, wrong account, or amount mismatch) and give
+  the corrected entry.
+- If the user mentions being stuck in a suspense, reserve, or
+  clearing account due to a mismatch, explain in simple words why
+  that happens (the difference between debit and credit could not
+  be matched automatically) and how to find and correct the
+  mismatched amount.
+- Only after the accounting logic is confirmed correct, explain how
+  to actually enter or post it in the selected ERP system (T-code,
+  Fiori app, or menu path as usual).
+- If the user's question is purely about verifying or correcting an
+  entry and does not ask how to post it, it is acceptable to give a
+  short, direct answer focused only on the accounting correctness,
+  without a full navigation walkthrough.
 
 ==================================================
 QUESTION UNDERSTANDING
@@ -587,17 +700,33 @@ The exact fields and available posting options depend on the SAP release, config
 VISUAL GUIDE
 ==================================================
 
-Create visualSteps for the most important SAP screens.
+Create visualSteps for the most important screens of the
+selected system (${sapModule}).
 
 IMPORTANT:
 Use EXACTLY the same step title as the procedure.
 
-The visual step title must describe the actual SAP screen.
+The visual step title must describe the actual screen the user
+would see in ${sapModule} for that step.
 
 Prefer 4 to 5 important visual steps.
 
 Do not create visual steps for unrelated screens.
 Do not invent a screen.
+
+==================================================
+END-OF-ANSWER FOLLOW-UP
+==================================================
+
+After giving the full answer, end with one short, specific
+follow-up sentence, not a generic sign-off. Prefer offering to
+check the user's own entry or screen directly - for example,
+inviting them to share the numbers they entered, or a screenshot
+of their screen, so you can confirm whether it is correct or spot
+the mistake. Keep it to one sentence, friendly and direct, in the
+same language as the rest of the answer (English or Hindi,
+matching the LANGUAGE instruction above). Do not repeat this
+offer more than once.
 
 ==================================================
 JSON FORMAT
@@ -636,7 +765,8 @@ Use this exact structure:
 IMPORTANT:
 Do NOT include searchQuery.
 
-The application will create the Google image search query automatically from the exact step title.
+The application will create the image search query automatically
+from the exact step title and the selected system.
 
 Do not put JSON inside Markdown code fences.
 `;
@@ -660,11 +790,15 @@ export async function POST(req: Request) {
 
     const effectiveModule = detectEffectiveModule(message, sapModule);
 
+    const isNonSap = NON_SAP_SYSTEMS.includes(effectiveModule);
+
     console.log(
       "SELECTED MODULE:",
       sapModule,
       "EFFECTIVE MODULE:",
-      effectiveModule
+      effectiveModule,
+      "IS NON-SAP:",
+      isNonSap
     );
 
     if (typeof message !== "string" || !message.trim()) {
@@ -758,11 +892,12 @@ export async function POST(req: Request) {
     /*
     ================================================
     STEP 4
-    FIND TRANSACTION
+    FIND TRANSACTION (SAP only - other systems don't
+    have T-codes, so this stays empty for them)
     ================================================
     */
 
-    const transaction = extractTransaction(answer);
+    const transaction = isNonSap ? "" : extractTransaction(answer);
 
     /*
     ================================================
@@ -797,32 +932,40 @@ export async function POST(req: Request) {
     /*
     ================================================
     STEP 6
-    GOOGLE IMAGE SEARCH
+    IMAGE SEARCH (ERP-aware)
 
-    We create the query ourselves from the
-    exact visual step title (not AI generated).
+    For SAP: only search when a real T-code has been
+    identified, same as before (avoids random images).
+
+    For non-SAP systems: no T-code exists, so we search
+    directly using the system name + step title.
     ================================================
     */
 
     const visualResults = await Promise.all(
       visualSteps.map(async (step) => {
-        // Only search for a SAP screenshot when a real transaction
-        // has been identified. This prevents unrelated images.
-        if (!transaction) {
+        if (!isNonSap && !transaction) {
           return null;
         }
 
         const searchQuery = createImageSearchQuery(
           effectiveModule,
           transaction,
-          step.title
+          step.title,
+          isNonSap
         );
 
-        console.log("GOOGLE IMAGE SEARCH:", searchQuery);
+        console.log("IMAGE SEARCH:", searchQuery);
 
         const images = await searchGoogleImages(searchQuery);
 
-        const image = selectBestImage(images, transaction, step.title);
+        const image = selectBestImage(
+          images,
+          transaction,
+          step.title,
+          effectiveModule,
+          isNonSap
+        );
 
         if (!image) {
           console.log("NO IMAGE FOUND:", searchQuery);
