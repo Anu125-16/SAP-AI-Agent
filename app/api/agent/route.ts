@@ -249,20 +249,12 @@ search (still filtered by selectBestImage).
 */
 
 const TRUSTED_DOMAINS: Record<string, string[]> = {
-  SAP: [
-    "blogs.sap.com",
-    "help.sap.com",
-    "community.sap.com",
-    "sapyard.com",
-    "guru99.com",
-    "tutorialspoint.com",
-    "erproof.com",
-  ],
-  Tally: ["tallysolutions.com", "tallyschool.com"],
+  SAP: ["blogs.sap.com", "help.sap.com", "community.sap.com"],
+  Tally: ["tallysolutions.com"],
   "Zoho Books": ["zoho.com"],
   Odoo: ["odoo.com"],
-  "Oracle ERP": ["docs.oracle.com", "oracle.com"],
-  "Microsoft Dynamics 365": ["learn.microsoft.com", "microsoft.com"],
+  "Oracle ERP": ["docs.oracle.com"],
+  "Microsoft Dynamics 365": ["learn.microsoft.com"],
 };
 
 function buildSiteRestrictedQuery(
@@ -1252,13 +1244,34 @@ export async function POST(req: Request) {
           systemKey
         );
 
-        console.log("IMAGE SEARCH (trusted sites):", restrictedQuery);
+        console.log("IMAGE SEARCH (trusted sites, full query):", restrictedQuery);
 
         let images = await searchGoogleImages(restrictedQuery);
 
+        // If nothing found with the full step title, try a broader
+        // trusted-domain search (system + transaction only). We do
+        // NOT fall back to the open web - a missing image is better
+        // than a wrong/unrelated one.
         if (images.length === 0) {
-          console.log("IMAGE SEARCH (fallback, open web):", searchQuery);
-          images = await searchGoogleImages(searchQuery);
+          const broaderQuery = [
+            isNonSap ? effectiveModule : "SAP",
+            transaction,
+            "screenshot",
+          ]
+            .filter(Boolean)
+            .join(" ");
+
+          const broaderRestrictedQuery = buildSiteRestrictedQuery(
+            broaderQuery,
+            systemKey
+          );
+
+          console.log(
+            "IMAGE SEARCH (trusted sites, broader query):",
+            broaderRestrictedQuery
+          );
+
+          images = await searchGoogleImages(broaderRestrictedQuery);
         }
 
         const image = selectBestImage(
