@@ -297,8 +297,8 @@ CHANGES:
    to NULL return karo, taaki koi unrelated image kabhi na dikhe.
 */
 
-const MIN_ACCEPTABLE_SCORE_SAP = 5;
-const MIN_ACCEPTABLE_SCORE_NON_SAP = 3;
+const MIN_ACCEPTABLE_SCORE_SAP = 8;
+const MIN_ACCEPTABLE_SCORE_NON_SAP = 5;
 
 const NEGATIVE_KEYWORDS_COMMON = [
   "debugger",
@@ -310,6 +310,41 @@ const NEGATIVE_KEYWORDS_COMMON = [
   "watchpoint",
   "workbench",
   "developer",
+  "cheat sheet",
+  "cheatsheet",
+  "infographic",
+  "reference chart",
+  "reference guide",
+  "poster",
+  "wallpaper",
+  "clip art",
+  "clipart",
+  "cartoon",
+  "meme",
+  "stock photo",
+  "banner image",
+  "cover image",
+  "t-code list",
+  "tcode list",
+  "night sky",
+  "landscape photo",
+];
+
+const DOMAIN_BLOCKLIST = [
+  "pinterest.",
+  "slideshare.net",
+  "shutterstock.com",
+  "istockphoto.com",
+  "gettyimages.com",
+  "alamy.com",
+  "freepik.com",
+  "unsplash.com",
+  "pexels.com",
+  "dreamstime.com",
+  "123rf.com",
+  "vecteezy.com",
+  "stock.adobe.com",
+  "canva.com",
 ];
 
 const OTHER_SYSTEM_KEYWORDS: Record<string, string[]> = {
@@ -371,8 +406,24 @@ function selectBestImage(
       continue;
     }
 
-    // FIX 2: Doosre ERP system ki image reject karo
+    // FIX 2: Stock photo / infographic / slide sites ko reject karo
+    if (DOMAIN_BLOCKLIST.some((domain) => combined.includes(domain))) {
+      continue;
+    }
+
+    // FIX 3: Doosre ERP system ki image reject karo
     if (rejectKeywords.some((kw) => combined.includes(kw))) {
+      continue;
+    }
+
+    // FIX 4: Agar image mein apne system ka naam (SAP/Tally/etc.)
+    // kahin bhi mention nahi hai, to ye image bilkul unrelated ho
+    // sakti hai - isse turant reject kar do, chahe koi aur keyword
+    // match ho jaye.
+    if (
+      ownSystemKeywords.length > 0 &&
+      !ownSystemKeywords.some((kw) => combined.includes(kw))
+    ) {
       continue;
     }
 
