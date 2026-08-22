@@ -11,6 +11,10 @@ const MODULES = [
   "SAP EWM",
   "SAP TM",
   "SAP Concur",
+  "Zoho Books",
+  "Odoo",
+  "Oracle ERP",
+  "Microsoft Dynamics 365",
   "Automation",
 ];
 
@@ -18,22 +22,22 @@ const FEATURES = [
   {
     title: "Step-by-Step Answers",
     description:
-      "Every question gets a clear, numbered, beginner-friendly answer with the exact SAP T-code or Fiori app to use.",
+      "Every question gets a clear, numbered, beginner-friendly answer with the exact steps, T-codes, or menu paths to follow.",
   },
   {
-    title: "Real SAP Screenshots",
+    title: "Real Screenshots",
     description:
-      "Answers come with actual SAP GUI screenshots matched to each step, so you can see exactly what to click before you touch a real SAP system.",
+      "Answers come with actual screenshots matched to each step, so you can see exactly what to click before you touch a live system.",
   },
   {
-    title: "All Major Modules",
+    title: "All Major ERP Systems",
     description:
-      "SAP MM, FICO, SD, PP, ABAP, Basis, HANA, EWM, TM, Concur, and Automation - all covered in one place.",
+      "SAP MM, FICO, SD, PP, ABAP, Basis, HANA, EWM, TM, Concur, Zoho Books, Odoo, Oracle ERP, Microsoft Dynamics 365, and Automation - all covered in one place.",
   },
   {
-    title: "No SAP Access Needed",
+    title: "No System Access Needed",
     description:
-      "You don't need an expensive SAP license or system access to learn. Ask a question and see the process end to end.",
+      "You don't need an expensive license or system access to learn. Ask a question and see the process end to end.",
   },
 ];
 
@@ -42,7 +46,7 @@ const STEPS = [
     step: "1",
     title: "Pick your module",
     description:
-      "Choose SAP MM, FICO, ABAP, or any other module you're working with.",
+      "Choose SAP MM, FICO, ABAP, Zoho Books, Odoo, or any other ERP module you're working with.",
   },
   {
     step: "2",
@@ -54,7 +58,7 @@ const STEPS = [
     step: "3",
     title: "Follow the guide",
     description:
-      "Get a simple step-by-step answer with the T-code and real screenshots for every important step.",
+      "Get a clear, step-by-step answer with the exact navigation and real screenshots for every important step.",
   },
 ];
 
@@ -81,18 +85,19 @@ export default function AboutPage() {
 
       <section className="mx-auto max-w-4xl px-6 py-20 text-center">
         <h1 className="text-4xl font-bold leading-tight text-slate-900 md:text-5xl">
-          Learn SAP the easy way,
+          Master ERP Systems the Smart Way,
           <br />
           <span className="text-cyan-600">
-            step by step, with real screenshots
+            Step by Step, with Real Screenshots
           </span>
         </h1>
 
         <p className="mx-auto mt-6 max-w-2xl text-lg text-slate-600">
-          ERP Tutor AI is a free SAP how-to assistant. Ask any question about
-          SAP MM, FICO, SD, ABAP, or other modules, and get a simple,
-          beginner-friendly answer with the exact steps and real SAP
-          screens - no SAP system access required.
+          ERP Tutor AI is a free, AI-powered learning assistant for ERP
+          software. Ask any question about SAP MM, FICO, SD, ABAP, Zoho
+          Books, Odoo, Oracle ERP, Microsoft Dynamics 365, and more - get
+          clear, beginner-friendly answers with exact steps and real
+          screenshots. No system access required.
         </p>
 
         <div className="mt-8 flex justify-center gap-4">
@@ -112,13 +117,14 @@ export default function AboutPage() {
           </h2>
 
           <p className="mt-4 text-slate-600">
-            Learning SAP is usually expensive and confusing. Real SAP
-            systems cost thousands of rupees to access, tutorials assume
-            you already know the jargon, and it's hard to know what a
-            screen actually looks like before an interview or your first
-            day on the job. ERP Tutor AI exists to close that gap - a free,
-            instant guide that explains any SAP process in plain language
-            and shows you the real screen for every step.
+            Learning ERP software has traditionally been expensive and
+            inaccessible. Enterprise systems cost thousands of rupees to
+            access, most tutorials assume prior familiarity with technical
+            jargon, and it's difficult to know what a real screen looks
+            like before an interview or your first day on the job. ERP
+            Tutor AI was built to close that gap - offering a free, instant
+            guide that explains any ERP process in plain language, backed
+            by real screenshots for every step.
           </p>
         </div>
       </section>
@@ -196,15 +202,16 @@ export default function AboutPage() {
 
           <p className="mt-4 text-slate-600">
             ERP Tutor AI is built by ERP Tutor Labs, founded by Anurag
-            Tiwari, with the goal of making SAP education accessible to
-            everyone, not just people who can afford expensive corporate
-            training. We believe anyone preparing for an SAP career or an
-            SAP interview should be able to see exactly what the software
-            looks like and how a process works - for free.
+            Tiwari, with a simple mission: make ERP education accessible to
+            everyone, not just those who can afford expensive corporate
+            training programs. We believe anyone preparing for an ERP
+            career or interview - across SAP, Oracle, Zoho Books, Odoo, or
+            Microsoft Dynamics 365 - deserves the opportunity to see
+            exactly how the software works, free of cost.
           </p>
 
           <p className="mt-4 text-sm text-slate-400">
-            Questions or feedback? Reach out at your-email@example.com
+            For questions or feedback, reach out at anuragtiwarijob12@gmail.com
           </p>
         </div>
       </section>
