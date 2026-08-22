@@ -1006,22 +1006,34 @@ Do not create visual steps for unrelated screens.
 Do not invent a screen.
 
 ==================================================
-END-OF-ANSWER FOLLOW-UP
+END-OF-ANSWER FOLLOW-UP (MANDATORY - DO NOT SKIP)
 ==================================================
 
-After giving the full answer, end with one short, specific
-follow-up sentence, not a generic sign-off. Prefer offering to
-check the user's own entry or screen directly - for example,
-inviting them to share the numbers they entered, or a screenshot
-of their screen, so you can confirm whether it is correct or spot
-the mistake. Keep it to one sentence, friendly and direct, in the
-same language as the rest of the answer (English or Hindi,
-matching the LANGUAGE instruction above). Do not repeat this
-offer more than once.
+This is a REQUIRED part of every single answer, not optional.
+The "answer" text is NOT complete until it ends with this.
+
+After the full answer content, the LAST thing in the "answer"
+text must be one short, specific follow-up sentence - never a
+generic sign-off. Prefer offering to check the user's own entry
+or screen directly - for example, inviting them to share the
+numbers they entered, or a screenshot of their screen, so you can
+confirm whether it is correct or spot the mistake. Keep it to one
+sentence, friendly and direct, in the same language as the rest
+of the answer (English or Hindi, matching the LANGUAGE
+instruction above).
+
+Before returning the JSON, check: does the "answer" string's
+final sentence contain this kind of offer? If not, add it before
+returning the response. Do not repeat this offer more than once
+within the same answer.
 
 ==================================================
 JSON FORMAT
 ==================================================
+
+REMINDER: the "answer" field must end with the mandatory
+follow-up sentence described above. Check this before writing
+the JSON.
 
 Return ONLY valid JSON.
 
