@@ -1029,6 +1029,7 @@ Use this exact structure:
 
 {
   "answer": "T-code: FB50\\nFiori app: Post General Journal Entries (SAP S/4HANA)\\n\\n1. Open the transaction or Fiori app...",
+  "detectedModule": "FI",
   "visualSteps": [
     {
       "step": 1,
@@ -1052,6 +1053,17 @@ Use this exact structure:
     }
   ]
 }
+
+IMPORTANT ABOUT "detectedModule":
+This must be the ACTUAL module/system this specific answer belongs
+to - based on your own analysis of the question - not necessarily
+the "Selected system" given above. If the selected system was
+"MM" but the question is really about a journal entry, set
+"detectedModule" to "FI". Use short values: "MM", "FI", "SD",
+"PP", "CO", "ABAP", "Basis", "HANA", "EWM", "TM", "Concur", or
+"Automation" for SAP topics. If the selected system is one of
+Tally, Zoho Books, Odoo, Oracle ERP, or Microsoft Dynamics 365,
+set "detectedModule" to that exact system name unchanged.
 
 IMPORTANT:
 Do NOT include searchQuery.
@@ -1134,6 +1146,7 @@ export async function POST(req: Request) {
 
     let result: {
       answer: string;
+      detectedModule?: string;
       visualSteps: VisualStep[];
     };
 
@@ -1346,7 +1359,25 @@ export async function POST(req: Request) {
     ================================================
     */
 
-    const detectedModule = isNonSap ? effectiveModule : `SAP ${effectiveModule}`;
+    const detectedModule = (() => {
+      const aiReported =
+        typeof result.detectedModule === "string"
+          ? result.detectedModule.trim()
+          : "";
+
+      if (isNonSap) {
+        // Non-SAP systems: trust our own detection (it's exact
+        // and already reliable), fall back to AI value if needed.
+        return effectiveModule || aiReported || sapModule;
+      }
+
+      // SAP: prefer the AI's own reasoning (it correctly catches
+      // cases our simple keyword regex misses), fall back to the
+      // regex-based guess if the AI didn't provide one.
+      const label = aiReported || effectiveModule;
+
+      return `SAP ${label.replace(/^SAP\s+/i, "")}`;
+    })();
 
     /*
     ================================================
