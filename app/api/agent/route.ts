@@ -249,7 +249,7 @@ search (still filtered by selectBestImage).
 */
 
 const TRUSTED_DOMAINS: Record<string, string[]> = {
-  SAP: ["blogs.sap.com", "help.sap.com", "community.sap.com"],
+  SAP: ["help.sap.com"],
   Tally: ["tallysolutions.com"],
   "Zoho Books": ["zoho.com"],
   Odoo: ["odoo.com"],
@@ -385,6 +385,13 @@ const NEGATIVE_KEYWORDS_COMMON = [
   "tcode list",
   "night sky",
   "landscape photo",
+  "video",
+  "youtube",
+  "webinar",
+  "watch now",
+  "tutorial video",
+  "s/4 hana finance",
+  "s/4hana finance",
 ];
 
 const DOMAIN_BLOCKLIST = [
@@ -402,6 +409,8 @@ const DOMAIN_BLOCKLIST = [
   "vecteezy.com",
   "stock.adobe.com",
   "canva.com",
+  "blogs.sap.com",
+  "youtube.com",
 ];
 
 const OTHER_SYSTEM_KEYWORDS: Record<string, string[]> = {
@@ -1326,6 +1335,21 @@ export async function POST(req: Request) {
 
     /*
     ================================================
+    STEP 7.5
+    FRIENDLY DETECTED MODULE LABEL
+
+    This tells the frontend what the AI actually
+    answered for, which can differ from what the user
+    had selected in the sidebar (e.g. user selected
+    SAP MM but asked a journal entry question, so the
+    AI correctly answered for SAP FI instead).
+    ================================================
+    */
+
+    const detectedModule = isNonSap ? effectiveModule : `SAP ${effectiveModule}`;
+
+    /*
+    ================================================
     STEP 8
     RETURN RESULT
     ================================================
@@ -1337,6 +1361,8 @@ export async function POST(req: Request) {
       answer,
 
       transaction,
+
+      detectedModule,
 
       visualSteps,
 

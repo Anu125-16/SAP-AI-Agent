@@ -19,6 +19,7 @@ type Message = {
   role: "user" | "assistant";
   content: string;
   visuals?: Visual[];
+  detectedModule?: string;
 };
 
 const MODULE_OPTIONS = [
@@ -236,6 +237,10 @@ export default function AgentPage() {
           role: "assistant",
           content: data.answer || "No answer was returned.",
           visuals: Array.isArray(data.visuals) ? data.visuals : [],
+          detectedModule:
+            typeof data.detectedModule === "string"
+              ? data.detectedModule
+              : undefined,
         },
       ]);
 
@@ -257,6 +262,7 @@ export default function AgentPage() {
           question: finalQuestion,
           answer: data.answer || "",
           module: sapModule,
+          detectedModule: data.detectedModule || "",
           language,
           timestamp: new Date().toISOString(),
         };
@@ -375,6 +381,10 @@ export default function AgentPage() {
               <p className="mt-1 text-sm text-slate-500">
                 Selected module:{" "}
                 <span className="text-cyan-600">{sapModule}</span>
+                <span className="ml-1 text-xs text-slate-400">
+                  (the AI will auto-detect the correct module for your
+                  question)
+                </span>
               </p>
             </div>
 
@@ -454,11 +464,17 @@ export default function AgentPage() {
                     <div
                       className={
                         isUser
-                          ? "mb-2 text-xs font-bold uppercase text-white/80"
-                          : "mb-3 text-xs font-bold uppercase text-slate-400"
+                          ? "mb-2 flex items-center gap-2 text-xs font-bold uppercase text-white/80"
+                          : "mb-3 flex flex-wrap items-center gap-2 text-xs font-bold uppercase text-slate-400"
                       }
                     >
-                      {isUser ? "YOU" : "ERP TUTOR AI"}
+                      <span>{isUser ? "YOU" : "ERP TUTOR AI"}</span>
+
+                      {!isUser && message.detectedModule && (
+                        <span className="rounded-full bg-cyan-50 px-2.5 py-1 text-[10px] font-bold normal-case tracking-normal text-cyan-700">
+                          Answered for: {message.detectedModule}
+                        </span>
+                      )}
                     </div>
 
                     <div
