@@ -49,6 +49,27 @@ function extractTransaction(answer: string): string {
     "MIRO",
     "FB50",
     "FB60",
+    "FB01",
+    "FB03",
+    "FB08",
+    "F-02",
+    "F-03",
+    "F-27",
+    "F-28",
+    "F-30",
+    "F-32",
+    "F-44",
+    "F.13",
+    "F.80",
+    "F110",
+    "FBRA",
+    "FBL1N",
+    "FBL3N",
+    "FBL5N",
+    "FS10N",
+    "XK01",
+    "FK01",
+    "FD01",
     "VA01",
     "VA02",
     "VA03",
@@ -213,6 +234,50 @@ function createImageSearchQuery(
   ].filter(Boolean);
 
   return parts.join(" ");
+}
+
+/*
+==================================================
+TRUSTED DOMAINS PER SYSTEM
+
+Real, reliable sources per ERP system. We try these
+FIRST so we get genuine product screenshots instead of
+random blogs, Pinterest boards, or decorative images.
+If nothing is found there, we fall back to a normal
+search (still filtered by selectBestImage).
+==================================================
+*/
+
+const TRUSTED_DOMAINS: Record<string, string[]> = {
+  SAP: [
+    "blogs.sap.com",
+    "help.sap.com",
+    "community.sap.com",
+    "sapyard.com",
+    "guru99.com",
+    "tutorialspoint.com",
+    "erproof.com",
+  ],
+  Tally: ["tallysolutions.com", "tallyschool.com"],
+  "Zoho Books": ["zoho.com"],
+  Odoo: ["odoo.com"],
+  "Oracle ERP": ["docs.oracle.com", "oracle.com"],
+  "Microsoft Dynamics 365": ["learn.microsoft.com", "microsoft.com"],
+};
+
+function buildSiteRestrictedQuery(
+  baseQuery: string,
+  systemKey: string
+): string {
+  const domains = TRUSTED_DOMAINS[systemKey] || [];
+
+  if (domains.length === 0) {
+    return baseQuery;
+  }
+
+  const siteFilter = domains.map((d) => `site:${d}`).join(" OR ");
+
+  return `${baseQuery} (${siteFilter})`;
 }
 
 /*
@@ -616,6 +681,42 @@ reconciliation difference, or asking "is this entry correct"):
   without a full navigation walkthrough.
 
 ==================================================
+RELATED TRANSACTIONS AND BULK/MASS ENTRY
+==================================================
+
+Real SAP FI work rarely uses just one T-code in isolation. When
+the user's question is about journal entries, postings, or
+clearing, mention the closely related transactions they will
+likely need next, briefly and only if genuinely relevant:
+
+- FB50 / F-02 - post a manual G/L journal entry.
+- FB03 - display an already-posted accounting document.
+- FB08 - reverse a posted document.
+- F-03 - clear open items on a G/L account (e.g. clearing a
+  suspense/reconciliation difference once it is resolved).
+- F.13 - automatic clearing of open items across accounts.
+- FBL3N - display G/L account line items (useful to check what
+  is sitting open/unmatched, such as during bank reconciliation).
+- F110 - automatic payment run, for batches of vendor payments.
+
+If the user's question implies they need to post MANY entries at
+once (bulk/mass entries), rather than one at a time, mention that
+this is normally NOT done one-by-one through FB50. Instead:
+- Fiori apps such as "Manage Journal Entries" or "Upload Journal
+  Entries" allow uploading a spreadsheet of multiple lines at
+  once, in S/4HANA.
+- In classic SAP GUI, tools like LSMW (Legacy System Migration
+  Workbench) or a Batch Input session are typically used by SAP
+  Basis/consultants to upload many entries from a file.
+- F.80 allows mass reversal of multiple documents at once.
+State plainly that setting these bulk tools up usually needs
+support from the SAP Basis/functional team the first time, and
+that this is different from the manual single-entry process.
+
+Only include the transactions/tools that are actually relevant to
+what the user asked - do not list all of them in every answer.
+
+==================================================
 QUESTION UNDERSTANDING
 ==================================================
 
@@ -1006,9 +1107,21 @@ export async function POST(req: Request) {
           isNonSap
         );
 
-        console.log("IMAGE SEARCH:", searchQuery);
+        const systemKey = isNonSap ? effectiveModule : "SAP";
 
-        const images = await searchGoogleImages(searchQuery);
+        const restrictedQuery = buildSiteRestrictedQuery(
+          searchQuery,
+          systemKey
+        );
+
+        console.log("IMAGE SEARCH (trusted sites):", restrictedQuery);
+
+        let images = await searchGoogleImages(restrictedQuery);
+
+        if (images.length === 0) {
+          console.log("IMAGE SEARCH (fallback, open web):", searchQuery);
+          images = await searchGoogleImages(searchQuery);
+        }
 
         const image = selectBestImage(
           images,
